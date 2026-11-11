@@ -95,7 +95,7 @@ fn raw_arg(cmd: &mut Command, line: String) {
     cmd.arg(line);
 }
 
-fn cmd_quote(a: &str) -> String {
+pub(crate) fn cmd_quote(a: &str) -> String {
     if a.is_empty() || a.contains([' ', '\t', '&', '|', '<', '>', '^', '(', ')']) {
         format!("\"{}\"", a.replace('"', "\"\""))
     } else {

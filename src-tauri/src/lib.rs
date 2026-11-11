@@ -1,33 +1,121 @@
+mod pty;
 mod registry;
 
+use pty::{PtyManager, SpawnRequest};
 use registry::DetectedAgent;
-use tauri::{Emitter, Manager};
+use serde::Serialize;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+use tauri::ipc::{Channel, InvokeResponseBody, Response};
+use tauri::{AppHandle, Emitter, Manager, State};
+
+/// Last detection result, so spawning doesn't re-walk PATH.
+#[derive(Default)]
+struct Detected(Mutex<Vec<DetectedAgent>>);
+
+fn detect_and_store(app: &AppHandle) -> Vec<DetectedAgent> {
+    let dir = app.path().app_config_dir().ok();
+    let agents = registry::detect_agents(dir.as_deref());
+    *app.state::<Detected>().0.lock().unwrap_or_else(|e| e.into_inner()) = agents.clone();
+    agents
+}
 
 /// Installed agents from the registry. Runs off the main thread; repeat calls
 /// are fast because probe results are cached.
 #[tauri::command]
-async fn detect_agents(app: tauri::AppHandle) -> Result<Vec<DetectedAgent>, String> {
-    let dir = app.path().app_config_dir().ok();
-    tauri::async_runtime::spawn_blocking(move || registry::detect_agents(dir.as_deref()))
-        .await
-        .map_err(|e| e.to_string())
+async fn detect_agents(app: AppHandle) -> Result<Vec<DetectedAgent>, String> {
+    tauri::async_runtime::spawn_blocking(move || detect_and_store(&app)).await.map_err(|e| e.to_string())
+}
+
+/// Start a detected agent in `cwd`. Returns its id; attach a pane with
+/// `attach_agent`. (Projects and profiles hook in here in later tasks.)
+#[tauri::command]
+async fn spawn_agent(
+    app: AppHandle,
+    agent_def_id: String,
+    cwd: PathBuf,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let find = |agents: &[DetectedAgent]| agents.iter().find(|a| a.def.id == agent_def_id).map(|a| a.launch.clone());
+        let cached = find(&app.state::<Detected>().0.lock().unwrap_or_else(|e| e.into_inner()));
+        let launch = cached
+            .or_else(|| find(&detect_and_store(&app)))
+            .ok_or_else(|| format!("agent `{agent_def_id}` is not installed"))?;
+        app.state::<PtyManager>().spawn(SpawnRequest { launch, args: vec![], cwd, env: vec![], cols, rows })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Route the agent's live output to `on_output` (raw bytes, batched) and
+/// return the scrollback to write first. Replaces any previous pane.
+#[tauri::command]
+async fn attach_agent(
+    pty: State<'_, PtyManager>,
+    agent_id: String,
+    on_output: Channel<InvokeResponseBody>,
+) -> Result<Response, String> {
+    let scrollback = pty.attach(&agent_id, Box::new(move |d| on_output.send(InvokeResponseBody::Raw(d)).is_ok()))?;
+    Ok(Response::new(scrollback))
+}
+
+/// Stop sending output (pane hidden). The agent keeps running and buffering.
+#[tauri::command]
+async fn detach_agent(pty: State<'_, PtyManager>, agent_id: String) -> Result<(), String> {
+    pty.detach(&agent_id)
+}
+
+#[tauri::command]
+async fn write(pty: State<'_, PtyManager>, agent_id: String, data: String) -> Result<(), String> {
+    pty.write(&agent_id, data.as_bytes())
+}
+
+#[tauri::command]
+async fn resize(pty: State<'_, PtyManager>, agent_id: String, cols: u16, rows: u16) -> Result<(), String> {
+    pty.resize(&agent_id, cols, rows)
+}
+
+#[tauri::command]
+async fn kill_agent(pty: State<'_, PtyManager>, agent_id: String) -> Result<(), String> {
+    pty.kill(&agent_id)
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AgentExit {
+    agent_id: String,
+    code: Option<u32>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(Detected::default())
         .setup(|app| {
+            let handle = app.handle().clone();
+            app.manage(PtyManager::new(Arc::new(move |id, code| {
+                let _ = handle.emit("agent:exit", AgentExit { agent_id: id.into(), code });
+            })));
             // Detect in the background at startup so the cache is warm before
             // the picker opens; the UI never waits on this.
             let handle = app.handle().clone();
             std::thread::spawn(move || {
-                let dir = handle.path().app_config_dir().ok();
-                let agents = registry::detect_agents(dir.as_deref());
+                let agents = detect_and_store(&handle);
                 let _ = handle.emit("registry:changed", agents);
             });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![detect_agents])
+        .invoke_handler(tauri::generate_handler![
+            detect_agents,
+            spawn_agent,
+            attach_agent,
+            detach_agent,
+            write,
+            resize,
+            kill_agent
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
