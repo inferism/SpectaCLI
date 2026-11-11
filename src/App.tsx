@@ -1,3 +1,10 @@
+import TitleBar from "./components/TitleBar/TitleBar";
+
 export default function App() {
-  return <main className="app" />;
+  return (
+    <div className="app">
+      <TitleBar />
+      <main />
+    </div>
+  );
 }

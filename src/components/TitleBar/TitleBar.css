@@ -1,0 +1,38 @@
+.titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 32px;
+  padding-left: 12px;
+  background: var(--bg);
+  border-bottom: 1px solid #23262e;
+  user-select: none;
+}
+
+.titlebar-title {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.titlebar-buttons {
+  display: flex;
+  height: 100%;
+}
+
+.titlebar-buttons button {
+  width: 46px;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  display: grid;
+  place-items: center;
+}
+
+.titlebar-buttons button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.titlebar-buttons button.close:hover {
+  background: #c42b1c;
+}
