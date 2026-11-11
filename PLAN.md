@@ -251,7 +251,7 @@ Estimates assume a few focused hours a day with an AI assistant. They are calend
 
 ### Phase 1: MVP (8 to 12 days)
 1. **(done)** Custom title bar: `data-tauri-drag-region`, min/max/close via the window API, double-click to maximize, and Windows 11 snap layouts on hover over maximize (verify; may need the `tauri-plugin-decorum` approach or a native hit-test).
-2. Registry + detection + shim resolution + impostor probe (Rust, with unit tests for PATH and shim parsing).
+2. **(done)** Registry + detection + shim resolution + impostor probe (Rust, with unit tests for PATH and shim parsing).
 3. `PtyManager`: spawn direct, Job Object, batched Channel output, write, resize, kill, ring buffer.
 4. `TermPane` component: xterm + fit + WebGL with DOM fallback, header (name, status dot placeholder, maximize).
 5. Auto grid: 1 = full, 2 = 1×2, 3 to 4 = 2×2, 5 to 6 = 3×2, 7 and up = 3×3 with a scroll; maximize/restore per pane.
