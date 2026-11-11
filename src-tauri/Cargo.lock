@@ -2954,10 +2954,12 @@ dependencies = [
 name = "spectacli"
 version = "0.1.0"
 dependencies = [
+ "regex",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
+ "toml 1.2.1+spec-1.1.0",
 ]
 
 [[package]]

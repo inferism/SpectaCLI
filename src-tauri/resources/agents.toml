@@ -1,0 +1,83 @@
+# Built-in agent registry. Users override or add entries in
+# <config>/agents.user.toml; entries are merged by `id`, key by key.
+#
+# Keys:
+#   id, name           identity shown in the UI (name defaults to id)
+#   commands           names to look up on PATH, tried in order
+#   version_args       arguments for the detection probe (3 s timeout)
+#   version_regex      the probe output must match this, or the command is
+#                      treated as an impostor (exit code must be 0 as well)
+#   new_session_args, resume_args, continue_args
+#                      session templates; {session_uuid} is substituted
+#   hook               status hook kind (see PLAN.md feature 4)
+#   config_dir_env     env var that points the CLI at a profile directory
+#   image_paste        "path" or "native"
+#   submit             bytes sent to submit a prompt (default "\r")
+
+[[agent]]
+id = "claude"
+name = "Claude Code"
+commands = ["claude"]
+version_args = ["--version"]
+version_regex = '\(Claude Code\)'
+new_session_args = ["--session-id", "{session_uuid}"]
+resume_args = ["--resume", "{session_uuid}"]
+continue_args = ["--continue"]
+hook = { kind = "claude-settings" }
+config_dir_env = "CLAUDE_CONFIG_DIR"
+image_paste = "path"
+submit = "\r"
+
+[[agent]]
+id = "codex"
+name = "Codex CLI"
+commands = ["codex"]
+version_args = ["--version"]
+version_regex = '(?i)codex'
+resume_args = ["resume", "--last"]
+hook = { kind = "codex-notify" }
+config_dir_env = "CODEX_HOME"
+
+[[agent]]
+id = "gemini"
+name = "Gemini CLI"
+commands = ["gemini"]
+version_args = ["--version"]
+version_regex = '\d+\.\d+\.\d+'
+
+[[agent]]
+id = "opencode"
+name = "OpenCode"
+commands = ["opencode"]
+version_args = ["--version"]
+version_regex = '\d+\.\d+\.\d+'
+
+[[agent]]
+id = "aider"
+name = "Aider"
+commands = ["aider"]
+version_args = ["--version"]
+version_regex = '(?i)aider'
+
+# VS Code puts a `copilot` shim on PATH that is not the Copilot CLI. It exits
+# non-zero with a "not found" message, so the probe rejects it.
+[[agent]]
+id = "copilot"
+name = "GitHub Copilot CLI"
+commands = ["copilot"]
+version_args = ["--version"]
+version_regex = '\d+\.\d+\.\d+'
+
+[[agent]]
+id = "qwen"
+name = "Qwen Code"
+commands = ["qwen"]
+version_args = ["--version"]
+version_regex = '\d+\.\d+\.\d+'
+
+[[agent]]
+id = "cursor-agent"
+name = "Cursor Agent"
+commands = ["cursor-agent"]
+version_args = ["--version"]
+version_regex = '\d+\.\d+'
