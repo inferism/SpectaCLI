@@ -62,7 +62,10 @@ const QUIET: Duration = Duration::from_secs(3);
 /// Characters of recent output the prompt regex is matched against.
 const TAIL: usize = 400;
 /// Used for agents whose registry entry has no `prompt_regex`.
-pub const DEFAULT_PROMPT: &str = r"(?i)\(y/n\)|\[y/n\]|\(y\)es|do you want to |allow\?";
+/// Besides y/n questions it catches the start-up menus (folder trust, hook
+/// review) that TUIs draw with cursor moves, hence `\s*` between words.
+pub const DEFAULT_PROMPT: &str =
+    r"(?i)\(y/n\)|\[y/n\]|\(y\)es|do you want to |allow\?|do\s*you\s*trust|trust\s*(this|the)\s*(folder|files|contents|workspace)|enter\W{0,3}(to\s*)?confirm";
 
 struct Entry {
     status: Status,
@@ -531,6 +534,16 @@ mod tests {
         assert_eq!(lock(&log).len(), 1);
         t.output("a", b"/n)", now);
         assert_eq!(lock(&log).last(), Some(&(Status::NeedsInput, Source::Heuristic)));
+    }
+
+    #[test]
+    fn default_prompt_catches_trust_and_hook_menus() {
+        let re = Regex::new(DEFAULT_PROMPT).unwrap();
+        assert!(re.is_match("Do you trust the contents of this project?"));
+        assert!(re.is_match("Yes,Itrustthisfolder"));
+        assert!(re.is_match("enter confirm · esc skip"));
+        assert!(re.is_match("Press Enter to confirm"));
+        assert!(!re.is_match("Entering the main loop"));
     }
 
     #[test]
