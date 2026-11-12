@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { activeConversation, type Conversation, type Project, soloAgentId, useWorkspace } from "../../store/workspace";
 import TermPane from "../TermPane/TermPane";
 import WorktreeMenu from "../TermPane/WorktreeMenu";
 import { useWindowShown } from "../../lib/windowShown";
+import BroadcastBar from "./BroadcastBar";
 import { gridDims } from "./gridDims";
 import "./PaneGrid.css";
 
@@ -56,6 +58,7 @@ function ProjectGrid({
   const hibernate = useWorkspace((s) => s.hibernate);
   const resume = useWorkspace((s) => s.resume);
   const setAutoHibernate = useWorkspace((s) => s.setAutoHibernate);
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
   const agents = conv.agents;
   if (agents.length === 0) return null;
 
@@ -87,6 +90,9 @@ function ProjectGrid({
             ))}
           </div>
         )}
+        <button className={`layout-broadcast${broadcastOpen ? " on" : ""}`} onClick={() => setBroadcastOpen((v) => !v)}>
+          Broadcast
+        </button>
       </div>
     <div
       className="grid"
@@ -140,6 +146,7 @@ function ProjectGrid({
         );
       })}
     </div>
+    {broadcastOpen && <BroadcastBar conv={conv} />}
     </div>
   );
 }

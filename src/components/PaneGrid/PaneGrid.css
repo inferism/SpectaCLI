@@ -68,3 +68,67 @@
   opacity: 1;
   background: rgba(255, 255, 255, 0.14);
 }
+
+.layout-broadcast {
+  margin-left: auto;
+}
+
+.layout-bar button.on {
+  opacity: 1;
+  background: #23262e;
+}
+
+.broadcast-bar {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-top: 1px solid #23262e;
+  font-size: 12px;
+}
+
+.broadcast-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.broadcast-targets label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.broadcast-row {
+  display: flex;
+  gap: 6px;
+}
+
+.broadcast-row textarea {
+  flex: 1;
+  resize: none;
+  background: #161920;
+  border: 1px solid #23262e;
+  color: inherit;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.broadcast-row button {
+  border: 0;
+  background: #23262e;
+  color: inherit;
+  padding: 0 14px;
+  cursor: pointer;
+}
+
+.broadcast-row button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.broadcast-note {
+  color: #e06c75;
+}
