@@ -10,10 +10,12 @@ interface Props {
   /** Set both to let the parent start editing (e.g. from a pencil button). */
   editing?: boolean;
   onEditingChange?: (editing: boolean) => void;
+  /** Accessible name of the text box. */
+  label?: string;
 }
 
 /** A name that turns into a text box on double-click. Enter or blur saves, Escape cancels. */
-export default function InlineName({ value, display, onCommit, className, editing: controlled, onEditingChange }: Props) {
+export default function InlineName({ value, display, onCommit, className, editing: controlled, onEditingChange, label }: Props) {
   const [own, setOwn] = useState(false);
   const editing = controlled ?? own;
   const setEditing = (v: boolean) => (onEditingChange ? onEditingChange(v) : setOwn(v));
@@ -28,6 +30,7 @@ export default function InlineName({ value, display, onCommit, className, editin
   return (
     <EditBox
       initial={value}
+      label={label ?? "Agent name"}
       onDone={(name) => {
         setEditing(false);
         if (name !== null && name.trim() && name.trim() !== value) onCommit(name);
@@ -37,7 +40,7 @@ export default function InlineName({ value, display, onCommit, className, editin
 }
 
 /** Mounted fresh for each edit, so the draft always starts from the current name. */
-function EditBox({ initial, onDone }: { initial: string; onDone: (name: string | null) => void }) {
+function EditBox({ initial, label, onDone }: { initial: string; label: string; onDone: (name: string | null) => void }) {
   const [draft, setDraft] = useState(initial);
   // Unmounting blurs the box; without this, Escape would also save on that blur.
   const finished = useRef(false);
@@ -52,7 +55,7 @@ function EditBox({ initial, onDone }: { initial: string; onDone: (name: string |
       autoFocus
       value={draft}
       maxLength={60}
-      aria-label="Agent name"
+      aria-label={label}
       onFocus={(e) => e.currentTarget.select()}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => finish(draft)}

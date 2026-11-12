@@ -22,6 +22,7 @@ export default function Sidebar() {
     launch,
     closeAgent,
     renameAgent,
+    renameConversation,
     newConversation,
     selectConversation,
   } = useWorkspace();
@@ -34,6 +35,7 @@ export default function Sidebar() {
   const [distros, setDistros] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renamingConv, setRenamingConv] = useState<string | null>(null);
 
   useEffect(() => {
     void detectAgents().then(setDetected).catch(() => {});
@@ -104,8 +106,30 @@ export default function Sidebar() {
       <ul className="sb-list">
         {active?.conversations.map((c) => (
           <li key={c.id} className={c.id === activeConversation(active).id ? "active" : ""}>
-            <button className="sb-main" onClick={() => selectConversation(active.id, c.id)}>{c.title}</button>
-            <small className="sb-stats">{c.agents.length}</small>
+            {renamingConv === c.id ? (
+              <span className="sb-main">
+                <InlineName
+                  value={c.title}
+                  label="Conversation name"
+                  onCommit={(t) => renameConversation(active.id, c.id, t)}
+                  editing
+                  onEditingChange={(v) => setRenamingConv(v ? c.id : null)}
+                />
+              </span>
+            ) : (
+              <button
+                className="sb-main"
+                title="Double-click to rename"
+                onClick={() => selectConversation(active.id, c.id)}
+                onDoubleClick={() => setRenamingConv(c.id)}
+              >
+                {c.title}
+              </button>
+            )}
+            <small className="sb-stats" title={`${c.agents.length} agents`}>{c.agents.length}</small>
+            <button className="sb-act" aria-label={`Rename ${c.title}`} title="Rename" onClick={() => setRenamingConv(c.id)}>
+              ✎
+            </button>
           </li>
         ))}
       </ul>
