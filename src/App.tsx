@@ -7,17 +7,20 @@ import { onAgentExit, onAgentStatus, onStatsTick } from "./lib/ipc";
 import { flushSave, startPersistence } from "./store/persist";
 import { useStats } from "./store/stats";
 import { recordStatus } from "./lib/attention";
+import { startAutoHibernate } from "./lib/hibernate";
 import { useWorkspace } from "./store/workspace";
 
 export default function App() {
   useEffect(() => {
-    const un = onAgentExit((e) => useWorkspace.getState().markExited(e.agentId));
+    const un = onAgentExit((e) => useWorkspace.getState().markExited(e.agentId, e.code));
     const unStats = onStatsTick((tick) => useStats.setState({ tick }));
     const unStatus = onAgentStatus(recordStatus);
     const unPersist = startPersistence();
+    const stopAutoHibernate = startAutoHibernate();
     // The window closes once this resolves, so the last change is on disk.
     const unClose = getCurrentWindow().onCloseRequested(() => flushSave());
     return () => {
+      stopAutoHibernate();
       void un.then((f) => f());
       void unStats.then((f) => f());
       void unStatus.then((f) => f());

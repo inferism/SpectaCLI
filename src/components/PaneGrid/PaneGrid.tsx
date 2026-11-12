@@ -36,6 +36,9 @@ function ProjectGrid({ project, visible, windowShown }: { project: Project; visi
   const toggleMaximize = useWorkspace((s) => s.toggleMaximize);
   const setLayoutMode = useWorkspace((s) => s.setLayoutMode);
   const focusAgent = useWorkspace((s) => s.focusAgent);
+  const hibernate = useWorkspace((s) => s.hibernate);
+  const resume = useWorkspace((s) => s.resume);
+  const setAutoHibernate = useWorkspace((s) => s.setAutoHibernate);
   const conv = activeConversation(project);
   const agents = conv.agents;
   if (agents.length === 0) return null;
@@ -63,7 +66,7 @@ function ProjectGrid({ project, visible, windowShown }: { project: Project; visi
                 className={a.id === focusedId ? "on" : ""}
                 onClick={() => focusAgent(project.id, a.id)}
               >
-                {runtime[a.id]?.exited ? `${a.name} (exited)` : a.name}
+                {a.hibernated ? `${a.name} (hibernated)` : runtime[a.id]?.exited ? `${a.name} (exited)` : a.name}
               </button>
             ))}
           </div>
@@ -80,7 +83,8 @@ function ProjectGrid({ project, visible, windowShown }: { project: Project; visi
       {agents.map((a) => {
         const rt = runtime[a.id];
         const shown = !maximized || maximized === a.id;
-        const name = rt?.exited ? `${a.name} (exited)` : a.name;
+        const base = rt?.note ? `${a.name} · ${rt.note}` : a.name;
+        const name = rt?.exited ? `${base} (exited)` : base;
         return (
           <div key={a.id} className="grid-cell" style={shown ? undefined : { display: "none" }}>
             {rt?.ptyId ? (
@@ -90,13 +94,28 @@ function ProjectGrid({ project, visible, windowShown }: { project: Project; visi
                 name={name}
                 maximized={!focusMode && maximized === a.id}
                 onToggleMaximize={() => toggleMaximize(project.id, a.id)}
+                hibernation={
+                  rt.resumable && !rt.exited
+                    ? {
+                        autoMin: a.autoHibernateMin ?? null,
+                        onHibernate: () => void hibernate(a.id),
+                        onAutoChange: (min) => setAutoHibernate(a.id, min),
+                      }
+                    : undefined
+                }
               />
             ) : (
               <section className="termpane">
                 <header className="termpane-header">
                   <span className="termpane-name">{a.name}</span>
                 </header>
-                <div className="grid-empty">Not running</div>
+                {a.hibernated ? (
+                  <button className="grid-empty termpane-resume" onClick={() => void resume(a.id)}>
+                    Hibernated · click to resume
+                  </button>
+                ) : (
+                  <div className="grid-empty">Not running</div>
+                )}
               </section>
             )}
           </div>

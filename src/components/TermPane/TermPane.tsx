@@ -45,9 +45,16 @@ interface Props {
   name: string;
   maximized: boolean;
   onToggleMaximize: () => void;
+  /** Set when the agent can be hibernated (its CLI can resume). */
+  hibernation?: {
+    autoMin: number | null;
+    onHibernate: () => void;
+    onAutoChange: (minutes: number | null) => void;
+  };
 }
 
 const RESIZE_DEBOUNCE_MS = 50;
+const AUTO_HIBERNATE_CHOICES = [5, 15, 30, 60];
 
 /**
  * A hidden pane has no terminal at all (PLAN.md feature 3): Rust keeps
@@ -55,7 +62,7 @@ const RESIZE_DEBOUNCE_MS = 50;
  * mounts a fresh xterm that replays the buffer. A hidden pane costs no
  * parsing, rendering, IPC or WebGL context.
  */
-export default function TermPane({ ptyId, visible, name, maximized, onToggleMaximize }: Props) {
+export default function TermPane({ ptyId, visible, name, maximized, onToggleMaximize, hibernation }: Props) {
   const usage = useStats((s) => s.tick?.agents[ptyId]);
   const status = useStatus((s) => s.byAgent[ptyId]);
   // Survives the terminal, so focus comes back with it.
@@ -70,6 +77,31 @@ export default function TermPane({ ptyId, visible, name, maximized, onToggleMaxi
           <span className="termpane-stats" title={usageTitle(usage)}>
             {fmtUsage(usage)}
           </span>
+        )}
+        {hibernation && (
+          <>
+            <select
+              className="termpane-auto"
+              aria-label="Auto-hibernate when idle"
+              title="Hibernate automatically after this long idle (needs a status signal from the CLI)"
+              value={hibernation.autoMin ?? ""}
+              onChange={(e) => hibernation.onAutoChange(e.target.value ? Number(e.target.value) : null)}
+            >
+              <option value="">Auto off</option>
+              {AUTO_HIBERNATE_CHOICES.map((m) => (
+                <option key={m} value={m}>
+                  Idle {m} min
+                </option>
+              ))}
+            </select>
+            <button
+              aria-label="Hibernate"
+              title="Hibernate: stop the CLI to free its memory and resume the session later"
+              onClick={hibernation.onHibernate}
+            >
+              ⏾
+            </button>
+          </>
         )}
         <button aria-label={maximized ? "Restore pane" : "Maximize pane"} onClick={onToggleMaximize}>
           {maximized ? "❐" : "▢"}

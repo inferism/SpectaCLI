@@ -96,7 +96,10 @@ export default function Sidebar() {
       <ul className="sb-list">
         {mine.map((a) => (
           <li key={a.id} className={runtime[a.id]?.ptyId && !runtime[a.id].exited ? "" : "exited"}>
-            <span className="sb-main">{a.name}</span>
+            <span className="sb-main">
+              {a.name}
+              {a.hibernated && <small> hibernated</small>}
+            </span>
             {(() => {
               const u = runtime[a.id]?.ptyId ? tick?.agents[runtime[a.id].ptyId!] : undefined;
               return u && <small className="sb-stats" title={`${u.processes} processes`}>{fmtBytes(u.privateBytes)}</small>;
