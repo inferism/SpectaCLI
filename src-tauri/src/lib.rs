@@ -1,5 +1,6 @@
 mod pty;
 mod registry;
+mod stats;
 mod store;
 
 use pty::{PtyManager, SpawnRequest};
@@ -223,6 +224,7 @@ pub fn run() {
             app.manage(PtyManager::new(Arc::new(move |id, code| {
                 let _ = handle.emit("agent:exit", AgentExit { agent_id: id.into(), code });
             })));
+            stats::spawn(app.handle().clone());
             // Detect in the background at startup so the cache is warm before
             // the picker opens; the UI never waits on this.
             let handle = app.handle().clone();

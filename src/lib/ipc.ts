@@ -91,6 +91,30 @@ export interface AgentExit {
 export const onAgentExit = (cb: (e: AgentExit) => void): Promise<UnlistenFn> =>
   listen<AgentExit>("agent:exit", (e) => cb(e.payload));
 
+// --- Stats (src-tauri/src/stats) ---
+
+/** One process tree's usage. */
+export interface Usage {
+  /** Private Bytes, as Process Explorer shows them: the "RAM" figure. */
+  privateBytes: number;
+  /** Working set, for the tooltip. */
+  workingSet: number;
+  /** Percent of the whole machine (0–100); 0 on a tree's first sample. */
+  cpu: number;
+  processes: number;
+}
+
+export interface StatsTick {
+  /** Keyed by agent (PTY) id. Agents whose process has exited are absent. */
+  agents: Record<string, Usage>;
+  /** Spectacli itself: its process, WebView2, and the ConPTY hosts. */
+  spectacli: Usage;
+}
+
+/** Every 1.5 s, all agents in one payload. */
+export const onStatsTick = (cb: (t: StatsTick) => void): Promise<UnlistenFn> =>
+  listen<StatsTick>("stats:tick", (e) => cb(e.payload));
+
 // --- Store (src-tauri/src/store.rs) ---
 
 /** The saved projects.json as raw JSON, or null when there is none yet. Rejects for a file from a newer version. */

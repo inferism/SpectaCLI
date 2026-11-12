@@ -42,7 +42,7 @@ struct Agent {
     master: Mutex<Option<Box<dyn MasterPty + Send>>>,
     size: Mutex<(u16, u16)>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
-    job: Option<Job>,
+    job: Option<Arc<Job>>,
 }
 
 pub struct PtyManager {
@@ -112,7 +112,7 @@ impl PtyManager {
             Ok(j)
         });
         let job = match job {
-            Ok(j) => Some(j),
+            Ok(j) => Some(Arc::new(j)),
             Err(e) => {
                 eprintln!("pty: no job object, tree kill unavailable: {e}");
                 None
@@ -235,6 +235,12 @@ impl PtyManager {
             let _ = lock(&agent.killer).kill();
         }
         Ok(())
+    }
+
+    /// Job Objects of the live agents, for the stats sampler. Holding one
+    /// past `kill` is harmless: the tree is already terminated.
+    pub fn jobs(&self) -> Vec<(String, Arc<Job>)> {
+        lock(&self.agents).iter().filter_map(|(id, a)| Some((id.clone(), a.job.clone()?))).collect()
     }
 
     #[cfg(test)]

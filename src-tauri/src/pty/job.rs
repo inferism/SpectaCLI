@@ -9,9 +9,10 @@ mod imp {
     use std::ptr::null;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicProcessIdList,
-        JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
-        TerminateJobObject, JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
+        JobObjectBasicProcessIdList, JobObjectExtendedLimitInformation, QueryInformationJobObject,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        JOBOBJECT_BASIC_PROCESS_ID_LIST, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
         JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
 
@@ -61,8 +62,27 @@ mod imp {
             Ok(())
         }
 
-        /// Every live PID in the tree (for the phase 2 stats sampler).
-        #[cfg_attr(not(test), allow(dead_code))]
+        /// User + kernel CPU time of every process that has ever been in the
+        /// job, exited ones included, in 100 ns units.
+        pub fn cpu_time(&self) -> io::Result<u64> {
+            // SAFETY: the struct is plain data sized for this info class.
+            unsafe {
+                let mut info: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION = zeroed();
+                if QueryInformationJobObject(
+                    self.0,
+                    JobObjectBasicAccountingInformation,
+                    &mut info as *mut _ as *mut _,
+                    size_of::<JOBOBJECT_BASIC_ACCOUNTING_INFORMATION>() as u32,
+                    std::ptr::null_mut(),
+                ) == 0
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok((info.TotalUserTime + info.TotalKernelTime).max(0) as u64)
+            }
+        }
+
+        /// Every live PID in the tree.
         pub fn pids(&self) -> io::Result<Vec<u32>> {
             const MAX: usize = 1024;
             #[repr(C)]
@@ -114,6 +134,9 @@ mod imp {
         }
         pub fn pids(&self) -> io::Result<Vec<u32>> {
             Ok(Vec::new())
+        }
+        pub fn cpu_time(&self) -> io::Result<u64> {
+            Ok(0)
         }
     }
 }
