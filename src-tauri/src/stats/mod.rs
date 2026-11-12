@@ -162,8 +162,17 @@ mod tests {
 
         let mut s = Sampler::new();
         let first = s.sample(&jobs);
-        std::thread::sleep(Duration::from_millis(1000));
-        let second = s.sample(&jobs);
+        // PowerShell can take seconds to start on a slow machine (CI), so
+        // sample until the loop shows up instead of trusting one second.
+        let want = 100.0 / s.cores as f32 * 0.5;
+        let mut second = first.clone();
+        for _ in 0..10 {
+            std::thread::sleep(Duration::from_millis(1000));
+            second = s.sample(&jobs);
+            if second.agents["a"].cpu > want {
+                break;
+            }
+        }
         let _ = job.terminate();
         let _ = child.wait();
 
@@ -172,7 +181,7 @@ mod tests {
         assert!(a.processes >= 1);
         assert!(a.private_bytes > 1 << 20, "{a:?}");
         assert!(a.working_set > 1 << 20, "{a:?}");
-        assert!(a.cpu > 100.0 / s.cores as f32 * 0.5, "busy loop should use most of a core: {a:?}");
+        assert!(a.cpu > want, "busy loop should use most of a core: {a:?}");
 
         // The test process itself; the agent's PID is excluded from it.
         let me = second.spectacli;
