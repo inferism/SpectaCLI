@@ -118,8 +118,18 @@ export const onStatsTick = (cb: (t: StatsTick) => void): Promise<UnlistenFn> =>
 
 // --- Store (src-tauri/src/store.rs) ---
 
-/** The saved projects.json as raw JSON, or null when there is none yet. Rejects for a file from a newer version. */
-export const loadProjects = () => invoke<unknown>("load_projects");
+export interface LoadedFile {
+  /** Raw JSON, already migrated to the current schemaVersion. */
+  data: unknown;
+  /** Set when the file could not be read and was recovered; tell the user. */
+  notice: string | null;
+}
+
+/**
+ * The saved projects.json, or null when there is none yet. Rejects for a file
+ * from a newer version or one whose migration failed (it is left untouched).
+ */
+export const loadProjects = () => invoke<LoadedFile | null>("load_projects");
 /** Atomic write; keeps the previous file as projects.json.bak. */
 export const saveProjects = (file: unknown) => invoke<void>("save_projects", { file });
 

@@ -27,7 +27,8 @@ function paneShown(projectId: string, instanceId: string): boolean {
   return solo === null || solo === instanceId;
 }
 
-async function toast(title: string, body: string) {
+/** An OS notification; asks for permission the first time. */
+export async function toast(title: string, body: string) {
   try {
     if (!(await isPermissionGranted()) && (await requestPermission()) !== "granted") return;
     sendNotification({ title, body });

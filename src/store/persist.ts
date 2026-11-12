@@ -1,3 +1,4 @@
+import { toast } from "../lib/attention";
 import { loadProjects, saveProjects } from "../lib/ipc";
 import { type ProjectsFile, toFile, useWorkspace } from "./workspace";
 
@@ -27,7 +28,12 @@ function write(json: string): Promise<void> {
 export async function startPersistence(): Promise<() => void> {
   let file: ProjectsFile | null;
   try {
-    file = (await loadProjects()) as ProjectsFile | null;
+    const loaded = await loadProjects();
+    file = (loaded?.data as ProjectsFile | undefined) ?? null;
+    if (loaded?.notice) {
+      console.warn(loaded.notice);
+      void toast("Spectacli recovered your projects", loaded.notice);
+    }
   } catch (e) {
     console.error("load projects.json; changes will not be saved:", e);
     return () => {};

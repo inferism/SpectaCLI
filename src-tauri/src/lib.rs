@@ -206,9 +206,10 @@ fn projects_path(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("projects.json"))
 }
 
-/// The saved projects file, or null when there is none yet.
+/// The saved projects file (migrated to the current version), or null when
+/// there is none yet. `notice` is set when the file had to be recovered.
 #[tauri::command]
-async fn load_projects(app: AppHandle, lock: State<'_, StoreLock>) -> Result<Option<serde_json::Value>, String> {
+async fn load_projects(app: AppHandle, lock: State<'_, StoreLock>) -> Result<Option<store::Loaded>, String> {
     let path = projects_path(&app)?;
     let _g = lock.0.lock().unwrap_or_else(|e| e.into_inner());
     store::load(&path)
