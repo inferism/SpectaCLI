@@ -58,6 +58,7 @@ function ProjectGrid({
   const hibernate = useWorkspace((s) => s.hibernate);
   const resume = useWorkspace((s) => s.resume);
   const setAutoHibernate = useWorkspace((s) => s.setAutoHibernate);
+  const renameAgent = useWorkspace((s) => s.renameAgent);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
   const agents = conv.agents;
   if (agents.length === 0) return null;
@@ -114,6 +115,8 @@ function ProjectGrid({
                 ptyId={rt.ptyId}
                 visible={visible && shown && windowShown}
                 name={name}
+                rawName={a.name}
+                onRename={(n) => renameAgent(a.id, n)}
                 maximized={!focusMode && maximized === a.id}
                 onToggleMaximize={() => toggleMaximize(project.id, a.id)}
                 worktree={a.worktree ? { instanceId: a.id, projectPath: project.path, info: a.worktree } : undefined}

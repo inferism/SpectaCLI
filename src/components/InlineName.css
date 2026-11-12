@@ -1,0 +1,11 @@
+.inline-name {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: #0f1115;
+  border: 1px solid #4cc9f0;
+  border-radius: 4px;
+  padding: 2px 4px;
+  outline: none;
+}

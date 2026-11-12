@@ -284,6 +284,15 @@ test("auto-hibernate minutes are saved and cleared", async () => {
   expect("autoHibernateMin" in agentsOf(ws().activeProjectId!)[0]).toBe(false);
 });
 
+test("an agent can be renamed; blank names are ignored", async () => {
+  ws().addProject("C:\a");
+  const id = (await ws().launch(ws().activeProjectId!, claude))!;
+  ws().renameAgent(id, "  Reviewer  ");
+  expect(agentsOf(ws().activeProjectId!)[0].name).toBe("Reviewer");
+  ws().renameAgent(id, "   ");
+  expect(agentsOf(ws().activeProjectId!)[0].name).toBe("Reviewer");
+});
+
 test("New adds an empty conversation and switches to it; the old one keeps its agents", async () => {
   ws().addProject("C:\a");
   const p = ws().activeProjectId!;

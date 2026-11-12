@@ -17,6 +17,8 @@ import type { AgentWorktree } from "../../store/workspace";
 import { useStats } from "../../store/stats";
 import { useStatus } from "../../store/status";
 import "./TermPane.css";
+import InlineName from "../InlineName";
+import "../InlineName.css";
 import WorktreeMenu from "./WorktreeMenu";
 
 const STATUS_LABEL: Record<AgentStatusKind, string> = {
@@ -45,6 +47,9 @@ interface Props {
   /** False while its project is in the background, another pane is maximized, or the window is minimized. */
   visible: boolean;
   name: string;
+  /** The agent's own name (without notes like "(exited)"), for renaming. */
+  rawName: string;
+  onRename: (name: string) => void;
   maximized: boolean;
   onToggleMaximize: () => void;
   /** Set when the agent runs in its own git worktree. */
@@ -66,7 +71,7 @@ const AUTO_HIBERNATE_CHOICES = [5, 15, 30, 60];
  * mounts a fresh xterm that replays the buffer. A hidden pane costs no
  * parsing, rendering, IPC or WebGL context.
  */
-export default function TermPane({ ptyId, visible, name, maximized, onToggleMaximize, hibernation, worktree }: Props) {
+export default function TermPane({ ptyId, visible, name, rawName, onRename, maximized, onToggleMaximize, hibernation, worktree }: Props) {
   const usage = useStats((s) => s.tick?.agents[ptyId]);
   const status = useStatus((s) => s.byAgent[ptyId]);
   // Survives the terminal, so focus comes back with it.
@@ -76,7 +81,7 @@ export default function TermPane({ ptyId, visible, name, maximized, onToggleMaxi
     <section className="termpane" data-pty={ptyId}>
       <header className="termpane-header">
         <span className={`termpane-dot${status ? ` is-${status.status}` : ""}`} title={statusTitle(status)} />
-        <span className="termpane-name">{name}</span>
+        <InlineName className="termpane-name" value={rawName} display={name} onCommit={onRename} />
         {usage && (
           <span className="termpane-stats" title={usageTitle(usage)}>
             {fmtUsage(usage)}

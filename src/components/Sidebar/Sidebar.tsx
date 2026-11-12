@@ -4,6 +4,8 @@ import { type DetectedAgent, detectAgents, listWslDistros, onRegistryChanged } f
 import { fmtBytes } from "../../lib/format";
 import { useStats } from "../../store/stats";
 import { activeConversation, type LaunchWhat, useWorkspace } from "../../store/workspace";
+import InlineName from "../InlineName";
+import "../InlineName.css";
 import "./Sidebar.css";
 
 export default function Sidebar() {
@@ -16,6 +18,7 @@ export default function Sidebar() {
     removeProject,
     launch,
     closeAgent,
+    renameAgent,
     newConversation,
     selectConversation,
   } = useWorkspace();
@@ -134,7 +137,7 @@ export default function Sidebar() {
         {mine.map((a) => (
           <li key={a.id} className={runtime[a.id]?.ptyId && !runtime[a.id].exited ? "" : "exited"}>
             <span className="sb-main">
-              {a.name}
+              <InlineName value={a.name} onCommit={(n) => renameAgent(a.id, n)} />
               {a.worktree && <small title={a.worktree.path}> ⎇</small>}
               {a.hibernated && <small> hibernated</small>}
             </span>
