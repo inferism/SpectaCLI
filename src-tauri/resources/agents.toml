@@ -98,3 +98,7 @@ commands = ["agy"]
 version_args = ["--version"]
 version_regex = '^\d+\.\d+\.\d+'
 continue_args = ["--continue"]
+# `--continue` reopens the folder's most recent conversation, like Codex's
+# `resume --last`, so an Antigravity agent can hibernate too.
+resume_args = ["--continue"]
+exit_keys = ["\u0003", "\u0003"]
