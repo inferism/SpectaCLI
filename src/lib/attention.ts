@@ -1,3 +1,4 @@
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { type InboxItem, inboxKind, useInbox } from "../store/inbox";
 import { useStatus } from "../store/status";
@@ -63,6 +64,12 @@ export function recordStatus(s: AgentStatus) {
     agentName: agent.name,
     at: s.at,
   });
+  // Flash the taskbar button when the window is in the background: until
+  // focused for a question, briefly for a finished turn.
+  if (!document.hasFocus()) {
+    const type = kind === "needs_input" ? UserAttentionType.Critical : UserAttentionType.Informational;
+    void getCurrentWindow().requestUserAttention(type).catch(() => {});
+  }
   const now = Date.now();
   const show = shouldToast({
     windowFocused: document.hasFocus(),
@@ -86,4 +93,17 @@ export function openInboxItem(item: InboxItem) {
   window.setTimeout(() => {
     document.querySelector<HTMLElement>(`[data-pty="${item.ptyId}"] .xterm-helper-textarea`)?.focus();
   }, 150);
+}
+
+/** Keep "(N waiting)" in the OS window title (taskbar, Alt+Tab). Returns an unsubscribe. */
+export function startWaitingTitle(): () => void {
+  let last = 0;
+  return useStatus.subscribe((st) => {
+    const n = Object.values(st.byAgent).filter((x) => x.status === "needs_input").length;
+    if (n === last) return;
+    last = n;
+    void getCurrentWindow()
+      .setTitle(n ? `SpectaCLI (${n} waiting)` : "SpectaCLI")
+      .catch(() => {});
+  });
 }
