@@ -219,6 +219,12 @@ async fn create_worktree(project: PathBuf, name: String) -> Result<worktree::Wor
     tauri::async_runtime::spawn_blocking(move || worktree::create(&project, &name)).await.map_err(|e| e.to_string())?
 }
 
+/// How many files a worktree has changed (0: safe to remove).
+#[tauri::command]
+async fn worktree_changes(path: PathBuf) -> Result<usize, String> {
+    tauri::async_runtime::spawn_blocking(move || worktree::changes(&path)).await.map_err(|e| e.to_string())?
+}
+
 /// Remove an agent's worktree; an error starting with `dirty:` means it has
 /// uncommitted changes and needs `force`. The branch is kept.
 #[tauri::command]
@@ -364,6 +370,7 @@ pub fn run() {
             spawn_wsl,
             create_worktree,
             remove_worktree,
+            worktree_changes,
             open_folder,
             attach_agent,
             detach_agent,

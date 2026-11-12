@@ -27,7 +27,7 @@ vi.mock("../lib/ipc", () => ({
   },
   createWorktree: async (project: string, name: string) => {
     const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-    return { path: `${project}\.spectacli\worktrees\${slug}`, branch: `spectacli/${slug}` };
+    return { path: `${project}/.spectacli/worktrees/${slug}`, branch: `spectacli/${slug}` };
   },
   worktreeChanges: async () => dirtyFiles,
   removeWorktree: async (path: string, force: boolean) => void removedTrees.push({ path, force }),
@@ -345,16 +345,16 @@ test("revealing an agent in another conversation starts that conversation's save
 });
 
 test("an isolated agent starts in its own worktree and records it", async () => {
-  ws().addProject("C:\code\a");
+  ws().addProject("C:/code/a");
   const id = (await ws().launch(ws().activeProjectId!, { command: "x" }, { isolate: true }))!;
   const a = findAgent(id);
   expect(a.worktree?.branch).toMatch(/^spectacli\/x-/);
   expect(a.cwd).toBe(a.worktree!.path);
-  expect(a.cwd.startsWith("C:\code\a\.spectacli\worktrees\\")).toBe(true);
+  expect(a.cwd.startsWith("C:/code/a/.spectacli/worktrees/")).toBe(true);
 });
 
 test("a launch that fails discards the worktree it made", async () => {
-  ws().addProject("C:\code\a");
+  ws().addProject("C:/code/a");
   spawnGate = Promise.reject(new Error("boom"));
   spawnGate.catch(() => {});
   await expect(ws().launch(ws().activeProjectId!, { command: "x" }, { isolate: true })).rejects.toThrow("boom");
@@ -363,7 +363,7 @@ test("a launch that fails discards the worktree it made", async () => {
 });
 
 test("removing a clean worktree closes the agent and deletes the folder", async () => {
-  ws().addProject("C:\code\a");
+  ws().addProject("C:/code/a");
   const id = (await ws().launch(ws().activeProjectId!, { command: "x" }, { isolate: true }))!;
   const path = findAgent(id).worktree!.path;
   await ws().removeWorktree(id);
@@ -373,7 +373,7 @@ test("removing a clean worktree closes the agent and deletes the folder", async 
 });
 
 test("a dirty worktree is refused until forced, and nothing is closed meanwhile", async () => {
-  ws().addProject("C:\code\a");
+  ws().addProject("C:/code/a");
   const id = (await ws().launch(ws().activeProjectId!, { command: "x" }, { isolate: true }))!;
   dirtyFiles = 2;
   await expect(ws().removeWorktree(id)).rejects.toMatch(/^dirty: 2 changed files/);
@@ -384,9 +384,9 @@ test("a dirty worktree is refused until forced, and nothing is closed meanwhile"
 });
 
 test("a WSL shell launches in the project folder and is saved as a wsl launch", async () => {
-  ws().addProject("C:\code\a");
+  ws().addProject("C:/code/a");
   const id = (await ws().launch(ws().activeProjectId!, { wslDistro: "Ubuntu" }))!;
-  expect(wslSpawns).toEqual([{ distro: "Ubuntu", command: null, cwd: "C:\code\a" }]);
+  expect(wslSpawns).toEqual([{ distro: "Ubuntu", command: null, cwd: "C:/code/a" }]);
   expect(findAgent(id).launch).toEqual({ kind: "wsl", distro: "Ubuntu" });
   expect(findAgent(id).name).toBe("WSL · Ubuntu");
 });

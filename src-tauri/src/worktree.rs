@@ -75,13 +75,18 @@ pub fn create(project: &Path, slug_in: &str) -> Result<Worktree, String> {
     Ok(Worktree { path, branch })
 }
 
+/// Number of changed (modified or untracked) files in a worktree.
+pub fn changes(path: &Path) -> Result<usize, String> {
+    Ok(git(path, &["status", "--porcelain"])?.lines().count())
+}
+
 /// Remove a worktree. Refuses (error starting with `DIRTY`) when it has
 /// uncommitted changes unless `force`. The branch is kept: it holds the work.
 pub fn remove(path: &Path, force: bool) -> Result<(), String> {
     if !force {
-        let status = git(path, &["status", "--porcelain"])?;
-        if !status.is_empty() {
-            return Err(format!("{DIRTY} {} changed files", status.lines().count()));
+        let n = changes(path)?;
+        if n > 0 {
+            return Err(format!("{DIRTY} {n} changed files"));
         }
     }
     // Run from the main working tree: git cannot remove the tree it is in.
@@ -137,6 +142,7 @@ mod tests {
         assert_eq!(exclude.matches(".spectacli/").count(), 1);
 
         std::fs::write(wt.path.join("x.txt"), "hi").unwrap();
+        assert_eq!(changes(&wt.path).unwrap(), 1);
         let err = remove(&wt.path, false).unwrap_err();
         assert!(err.starts_with(DIRTY), "{err}");
         remove(&wt.path, true).unwrap();
