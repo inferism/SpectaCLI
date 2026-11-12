@@ -11,9 +11,9 @@ export function fmtCpu(p: number): string {
   return `${p < 10 ? p.toFixed(1) : Math.round(p)}%`;
 }
 
-/** "412 MB · 3.4%" */
+/** "412 MB · 3.4%"; an idle agent's "0.0%" is left out. */
 export function fmtUsage(u: Usage): string {
-  return `${fmtBytes(u.privateBytes)} · ${fmtCpu(u.cpu)}`;
+  return u.cpu < 0.05 ? fmtBytes(u.privateBytes) : `${fmtBytes(u.privateBytes)} · ${fmtCpu(u.cpu)}`;
 }
 
 export function usageTitle(u: Usage): string {
