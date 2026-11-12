@@ -29,6 +29,7 @@ toml = "1"
 portable-pty = "0.9.0"
 uuid = { version = "1.29.2", features = ["v7"] }
 tauri-plugin-dialog = "2.8.4"
+tauri-plugin-notification = "2.8.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

@@ -15,7 +15,7 @@ vi.mock("../lib/ipc", () => ({
   killAgent: async (id: string) => void killed.push(id),
 }));
 
-const { activeConversation, toFile, useWorkspace } = await import("./workspace");
+const { activeConversation, soloAgentId, toFile, useWorkspace } = await import("./workspace");
 const ws = () => useWorkspace.getState();
 const agentsOf = (projectId: string) => activeConversation(ws().projects.find((p) => p.id === projectId)!).agents;
 
@@ -134,4 +134,26 @@ test("hydrate gives a project without conversations a default one", () => {
   const p = ws().projects[0];
   expect(p.name).toBe("proj");
   expect(activeConversation(p).agents).toEqual([]);
+});
+
+test("revealAgent focuses the agent and moves a maximize onto it", async () => {
+  ws().addProject("C:\code\a");
+  const p = ws().projects[0].id;
+  const a = (await ws().launch(p, { command: "x" }))!;
+  const b = (await ws().launch(p, { command: "y" }))!;
+  const conv = () => activeConversation(ws().projects[0]);
+
+  ws().revealAgent(p, b);
+  expect(conv().layout.focusedAgentId).toBe(b);
+  expect(conv().layout.maximizedAgentId).toBeNull();
+  expect(soloAgentId(conv())).toBeNull();
+
+  ws().toggleMaximize(p, a);
+  ws().revealAgent(p, b);
+  expect(conv().layout.maximizedAgentId).toBe(b);
+  expect(soloAgentId(conv())).toBe(b);
+
+  ws().setLayoutMode(p, "focus");
+  ws().revealAgent(p, a);
+  expect(soloAgentId(conv())).toBe(a);
 });

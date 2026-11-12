@@ -130,12 +130,12 @@ export type AgentStatusKind = "starting" | "working" | "idle" | "needs_input" | 
 export interface AgentStatus {
   agentId: string;
   status: AgentStatusKind;
-  /** What reported it: the launch itself, a CLI hook, or the process exit. */
-  source: "launch" | "hook" | "exit";
+  /** What reported it: the launch itself, a CLI hook, a terminal signal (bell/OSC), a guess from the output, or the process exit. */
+  source: "launch" | "hook" | "terminal" | "heuristic" | "exit";
   /** Unix time in ms. */
   at: number;
 }
 
-/** Fired on every status change of an agent that has a status source (today: CLIs with hooks). */
+/** Fired on every status change of an agent that has a status source (hooks, terminal signals, or output heuristics). */
 export const onAgentStatus = (cb: (s: AgentStatus) => void): Promise<UnlistenFn> =>
   listen<AgentStatus>("agent:status", (e) => cb(e.payload));

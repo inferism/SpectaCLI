@@ -81,6 +81,8 @@ interface WorkspaceState {
   toggleMaximize: (projectId: string, instanceId: string) => void;
   setLayoutMode: (projectId: string, mode: Layout["mode"]) => void;
   focusAgent: (projectId: string, instanceId: string) => void;
+  /** Make sure `instanceId` is on screen in its project (focus tab, or the maximized pane), e.g. from an inbox click. */
+  revealAgent: (projectId: string, instanceId: string) => void;
 }
 
 const now = () => new Date().toISOString();
@@ -93,6 +95,16 @@ const samePath = (a: string, b: string) => {
 
 export const activeConversation = (p: Project): Conversation =>
   p.conversations.find((c) => c.id === p.activeConversationId) ?? p.conversations[0];
+
+/**
+ * The one agent a conversation shows alone: the focused tab in focus mode
+ * (first agent when unset), else the maximized one. Null in a plain grid.
+ */
+export function soloAgentId(c: Conversation): string | null {
+  const has = (id: string | null) => c.agents.some((a) => a.id === id);
+  if (c.layout.mode === "focus") return has(c.layout.focusedAgentId) ? c.layout.focusedAgentId : (c.agents[0]?.id ?? null);
+  return has(c.layout.maximizedAgentId) ? c.layout.maximizedAgentId : null;
+}
 
 function newConversation(): Conversation {
   return { id: crypto.randomUUID(), title: "Default", createdAt: now(), agents: [], layout: { mode: "grid", focusedAgentId: null, maximizedAgentId: null } };
@@ -320,6 +332,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       projects: updateConversation(s.projects, projectId, (c) => ({
         ...c,
         layout: { ...c.layout, focusedAgentId: instanceId },
+      })),
+    })),
+
+  revealAgent: (projectId, instanceId) =>
+    set((s) => ({
+      projects: updateConversation(s.projects, projectId, (c) => ({
+        ...c,
+        layout: {
+          ...c.layout,
+          focusedAgentId: instanceId,
+          maximizedAgentId: c.layout.maximizedAgentId ? instanceId : null,
+        },
       })),
     })),
 }));

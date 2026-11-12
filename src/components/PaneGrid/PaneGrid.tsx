@@ -1,4 +1,4 @@
-import { activeConversation, type Project, useWorkspace } from "../../store/workspace";
+import { activeConversation, type Project, soloAgentId, useWorkspace } from "../../store/workspace";
 import TermPane from "../TermPane/TermPane";
 import { useWindowShown } from "../../lib/windowShown";
 import { gridDims } from "./gridDims";
@@ -42,13 +42,9 @@ function ProjectGrid({ project, visible, windowShown }: { project: Project; visi
 
   const { cols, rows } = gridDims(agents.length);
   const focusMode = conv.layout.mode === "focus";
-  const focusedId = agents.some((a) => a.id === conv.layout.focusedAgentId) ? conv.layout.focusedAgentId : agents[0].id;
   // Focus mode is a maximize that the tab strip drives, so it reuses the same single-cell grid.
-  const maximized = focusMode
-    ? focusedId
-    : agents.some((a) => a.id === conv.layout.maximizedAgentId)
-      ? conv.layout.maximizedAgentId
-      : null;
+  const maximized = soloAgentId(conv);
+  const focusedId = maximized ?? agents[0].id;
   // Past 3x3 the rows stay at a third of the viewport and the grid scrolls.
   const rowSize = `calc(100% / ${Math.min(rows, 3)})`;
 

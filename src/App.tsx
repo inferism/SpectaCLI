@@ -6,14 +6,14 @@ import TitleBar from "./components/TitleBar/TitleBar";
 import { onAgentExit, onAgentStatus, onStatsTick } from "./lib/ipc";
 import { flushSave, startPersistence } from "./store/persist";
 import { useStats } from "./store/stats";
-import { setStatus } from "./store/status";
+import { recordStatus } from "./lib/attention";
 import { useWorkspace } from "./store/workspace";
 
 export default function App() {
   useEffect(() => {
     const un = onAgentExit((e) => useWorkspace.getState().markExited(e.agentId));
     const unStats = onStatsTick((tick) => useStats.setState({ tick }));
-    const unStatus = onAgentStatus(setStatus);
+    const unStatus = onAgentStatus(recordStatus);
     const unPersist = startPersistence();
     // The window closes once this resolves, so the last change is on disk.
     const unClose = getCurrentWindow().onCloseRequested(() => flushSave());

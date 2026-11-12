@@ -28,6 +28,8 @@ const STATUS_LABEL: Record<AgentStatusKind, string> = {
 const SOURCE_LABEL: Record<AgentStatus["source"], string> = {
   launch: "since launch",
   hook: "reported by the CLI's hook",
+  terminal: "from a bell or notification in its output",
+  heuristic: "guessed from its output, may be wrong",
   exit: "process ended",
 };
 
@@ -60,7 +62,7 @@ export default function TermPane({ ptyId, visible, name, maximized, onToggleMaxi
   const hadFocus = useRef(false);
 
   return (
-    <section className="termpane">
+    <section className="termpane" data-pty={ptyId}>
       <header className="termpane-header">
         <span className={`termpane-dot${status ? ` is-${status.status}` : ""}`} title={statusTitle(status)} />
         <span className="termpane-name">{name}</span>

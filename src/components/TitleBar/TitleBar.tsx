@@ -2,6 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
 import { fmtBytes, fmtCpu } from "../../lib/format";
 import { useStats } from "../../store/stats";
+import Inbox from "../Inbox/Inbox";
 import "./TitleBar.css";
 
 export default function TitleBar() {
@@ -37,6 +38,7 @@ export default function TitleBar() {
         </span>
       )}
       <div className="titlebar-buttons">
+        <Inbox />
         <button aria-label="Minimize" onClick={() => void win.minimize()}>
           <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" /></svg>
         </button>
