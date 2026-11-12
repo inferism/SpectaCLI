@@ -1,4 +1,7 @@
-//! `spectacli-notify <pipe> <agent-id> <event> [payload]`
+//! `spectacli-notify <pipe> <agent-id> <event> [-- <command...>] [payload]`
+//!
+//! With `-- <command...>` (Codex, whose one `notify` slot we take), it also
+//! runs the user's own notify command with the payload appended.
 //!
 //! Run by an agent CLI's hook (PLAN.md feature 4). Sends one message to
 //! SpectaCLI's named pipe and exits:
@@ -30,7 +33,24 @@ fn run() -> Option<()> {
     if !pipe.starts_with("spectacli-") || !pipe.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-') {
         return None;
     }
-    let mut payload = args.next().unwrap_or_default().into_bytes();
+    // Codex: `[-- <user's notify command...>] <payload>`, payload last.
+    let mut rest: Vec<String> = args.collect();
+    let mut payload = rest.pop().unwrap_or_default();
+    if rest.first().is_some_and(|a| a == "--") && rest.len() > 1 {
+        // The user's own notify, which ours replaced: run it with the same
+        // payload, as Codex would have. Not awaited.
+        let _ = std::process::Command::new(&rest[1])
+            .args(&rest[2..])
+            .arg(&payload)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+    } else if !rest.is_empty() {
+        // Not the shape we launch with: forward nothing odd.
+        payload.clear();
+    }
+    let mut payload = payload.into_bytes();
     if event.starts_with("claude-") {
         let _ = std::io::stdin().take(MAX_PAYLOAD).read_to_end(&mut payload);
     }

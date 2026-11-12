@@ -165,6 +165,26 @@ mod tests {
         assert!(codex.unwrap().success());
         assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), r#"id2|codex|{"type":"agent-turn-complete"}"#);
 
+        // Chained user notify: runs with the payload appended; ours still arrives.
+        let out = std::env::temp_dir().join(format!("{name}.txt"));
+        let out_s = out.to_string_lossy().into_owned();
+        let chained = Command::new(&helper)
+            .args([&name, "id3", "codex", "--", "cmd.exe", "/d", "/c", "echo", ">", &out_s])
+            .arg(r#"{"type":"agent-turn-complete"}"#)
+            .status();
+        assert!(chained.unwrap().success());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), r#"id3|codex|{"type":"agent-turn-complete"}"#);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let text = loop {
+            let t = std::fs::read_to_string(&out).unwrap_or_default();
+            if t.contains("agent-turn-complete") || std::time::Instant::now() > deadline {
+                break t;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        let _ = std::fs::remove_file(&out);
+        assert!(text.contains("agent-turn-complete"), "chained command output: {text:?}");
+
         // No server: exits 0 after its short wait instead of failing the CLI.
         let gone = Command::new(&helper).args(["spectacli-nobody", "id", "codex", "{}"]).status();
         assert!(gone.unwrap().success());

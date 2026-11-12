@@ -149,7 +149,7 @@ impl Hooks {
     pub fn args(&self, kind: &str, agent_id: &str) -> Vec<String> {
         match kind {
             "claude-settings" => claude_args(&self.helper, &self.pipe, agent_id).unwrap_or_default(),
-            "codex-notify" => codex_args(&self.helper, &self.pipe, agent_id),
+            "codex-notify" => codex_args(&self.helper, &self.pipe, agent_id, &codex_user_notify()),
             _ => vec![],
         }
     }
@@ -184,12 +184,38 @@ fn claude_args(helper: &Path, pipe: &str, agent_id: &str) -> Option<Vec<String>>
 }
 
 /// `-c notify=[...]`. Codex runs it directly (no shell) and appends its
-/// JSON payload. This replaces a `notify` the user set in config.toml for
-/// this launch only.
-fn codex_args(helper: &Path, pipe: &str, agent_id: &str) -> Vec<String> {
+/// JSON payload. Codex takes only one `notify`, so the user's own (`chain`)
+/// goes after `--` and the helper runs it too with the same payload.
+fn codex_args(helper: &Path, pipe: &str, agent_id: &str, chain: &[String]) -> Vec<String> {
+    let mut cmd = vec![helper.to_string_lossy().into_owned(), pipe.into(), agent_id.into(), "codex".into()];
+    if !chain.is_empty() {
+        cmd.push("--".into());
+        cmd.extend_from_slice(chain);
+    }
     // A JSON array of strings is also a valid TOML array.
-    let cmd = [helper.to_string_lossy().into_owned(), pipe.into(), agent_id.into(), "codex".into()];
-    vec!["-c".into(), format!("notify={}", serde_json::Value::from(cmd.to_vec()))]
+    vec!["-c".into(), format!("notify={}", serde_json::Value::from(cmd))]
+}
+
+/// The `notify` command from the user's Codex `config.toml`
+/// (`$CODEX_HOME`, else `~/.codex`), if any. Ours is skipped so a stale
+/// entry can't make the helper call itself.
+fn codex_user_notify() -> Vec<String> {
+    let home = std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join(".codex")));
+    let text = home.and_then(|h| std::fs::read_to_string(h.join("config.toml")).ok()).unwrap_or_default();
+    parse_codex_notify(&text)
+}
+
+fn parse_codex_notify(config: &str) -> Vec<String> {
+    let table: toml::Table = toml::from_str(config).unwrap_or_default();
+    let cmd: Vec<String> = table
+        .get("notify")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let ours = cmd.first().is_some_and(|p| p.to_ascii_lowercase().ends_with("spectacli-notify.exe"));
+    if ours { vec![] } else { cmd }
 }
 
 /// The status tracker plus, when the pipe and helper are available, the hook
@@ -437,10 +463,23 @@ mod tests {
 
     #[test]
     fn builds_codex_notify_as_toml() {
-        let args = codex_args(Path::new(r"C:\Program Files\x.exe"), "spectacli-1-ab", "id1");
-        assert_eq!(args[0], "-c");
-        let v: toml::Table = toml::from_str(&args[1]).unwrap();
-        let cmd: Vec<_> = v["notify"].as_array().unwrap().iter().map(|s| s.as_str().unwrap()).collect();
-        assert_eq!(cmd, [r"C:\Program Files\x.exe", "spectacli-1-ab", "id1", "codex"]);
+        let notify = |chain: &[String]| {
+            let args = codex_args(Path::new(r"C:\Program Files\x.exe"), "spectacli-1-ab", "id1", chain);
+            assert_eq!(args[0], "-c");
+            let v: toml::Table = toml::from_str(&args[1]).unwrap();
+            v["notify"].as_array().unwrap().iter().map(|s| s.as_str().unwrap().to_string()).collect::<Vec<_>>()
+        };
+        assert_eq!(notify(&[]), [r"C:\Program Files\x.exe", "spectacli-1-ab", "id1", "codex"]);
+        let user = [r#"C:\a "b"\n.exe"#.to_string(), "turn-ended".into()];
+        assert_eq!(notify(&user), [r"C:\Program Files\x.exe", "spectacli-1-ab", "id1", "codex", "--", r#"C:\a "b"\n.exe"#, "turn-ended"]);
+    }
+
+    #[test]
+    fn reads_user_codex_notify() {
+        let cfg = "model = \"x\"\nnotify = [ \"C:\\\\tools\\\\n.exe\", \"turn-ended\" ]\n[tui]\nx = 1\n";
+        assert_eq!(parse_codex_notify(cfg), [r"C:\tools\n.exe", "turn-ended"]);
+        assert!(parse_codex_notify("[tui]\nx = 1").is_empty());
+        assert!(parse_codex_notify("not toml [").is_empty());
+        assert!(parse_codex_notify(r#"notify = ['C:\x\Spectacli-Notify.exe', "p"]"#).is_empty(), "never chain to ourselves");
     }
 }
