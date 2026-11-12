@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="1024" height="1024">
+  <title>SpectaCLI icon</title>
+  <rect width="256" height="256" rx="56" fill="#0f1115"/>
+  <rect x="32" y="40" width="192" height="176" rx="20" fill="none" stroke="#e6e8ee" stroke-width="16"/>
+  <path d="M122 40v176M122 128h102" stroke="#e6e8ee" stroke-width="16"/>
+  <path d="M54 94l28 24-28 24" fill="none" stroke="#4cc9f0" stroke-width="16"/>
+  <circle cx="173" cy="84" r="16" fill="#3ddc97"/>
+  <circle cx="173" cy="172" r="16" fill="#ffb703"/>
+</svg>
