@@ -1,5 +1,6 @@
 import { activeConversation, type Conversation, type Project, soloAgentId, useWorkspace } from "../../store/workspace";
 import TermPane from "../TermPane/TermPane";
+import WorktreeMenu from "../TermPane/WorktreeMenu";
 import { useWindowShown } from "../../lib/windowShown";
 import { gridDims } from "./gridDims";
 import "./PaneGrid.css";
@@ -109,6 +110,7 @@ function ProjectGrid({
                 name={name}
                 maximized={!focusMode && maximized === a.id}
                 onToggleMaximize={() => toggleMaximize(project.id, a.id)}
+                worktree={a.worktree ? { instanceId: a.id, projectPath: project.path, info: a.worktree } : undefined}
                 hibernation={
                   rt.resumable && !rt.exited
                     ? {
@@ -123,6 +125,7 @@ function ProjectGrid({
               <section className="termpane">
                 <header className="termpane-header">
                   <span className="termpane-name">{a.name}</span>
+                  {a.worktree && <WorktreeMenu instanceId={a.id} projectPath={project.path} worktree={a.worktree} />}
                 </header>
                 {a.hibernated ? (
                   <button className="grid-empty termpane-resume" onClick={() => void resume(a.id)}>

@@ -13,9 +13,11 @@ import {
   writeAgent,
 } from "../../lib/ipc";
 import { fmtUsage, usageTitle } from "../../lib/format";
+import type { AgentWorktree } from "../../store/workspace";
 import { useStats } from "../../store/stats";
 import { useStatus } from "../../store/status";
 import "./TermPane.css";
+import WorktreeMenu from "./WorktreeMenu";
 
 const STATUS_LABEL: Record<AgentStatusKind, string> = {
   starting: "Starting",
@@ -45,6 +47,8 @@ interface Props {
   name: string;
   maximized: boolean;
   onToggleMaximize: () => void;
+  /** Set when the agent runs in its own git worktree. */
+  worktree?: { instanceId: string; projectPath: string; info: AgentWorktree };
   /** Set when the agent can be hibernated (its CLI can resume). */
   hibernation?: {
     autoMin: number | null;
@@ -62,7 +66,7 @@ const AUTO_HIBERNATE_CHOICES = [5, 15, 30, 60];
  * mounts a fresh xterm that replays the buffer. A hidden pane costs no
  * parsing, rendering, IPC or WebGL context.
  */
-export default function TermPane({ ptyId, visible, name, maximized, onToggleMaximize, hibernation }: Props) {
+export default function TermPane({ ptyId, visible, name, maximized, onToggleMaximize, hibernation, worktree }: Props) {
   const usage = useStats((s) => s.tick?.agents[ptyId]);
   const status = useStatus((s) => s.byAgent[ptyId]);
   // Survives the terminal, so focus comes back with it.
@@ -78,6 +82,7 @@ export default function TermPane({ ptyId, visible, name, maximized, onToggleMaxi
             {fmtUsage(usage)}
           </span>
         )}
+        {worktree && <WorktreeMenu instanceId={worktree.instanceId} projectPath={worktree.projectPath} worktree={worktree.info} />}
         {hibernation && (
           <>
             <select

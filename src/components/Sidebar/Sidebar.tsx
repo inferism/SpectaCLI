@@ -1,6 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
-import { type DetectedAgent, detectAgents, onRegistryChanged } from "../../lib/ipc";
+import { type DetectedAgent, detectAgents, listWslDistros, onRegistryChanged } from "../../lib/ipc";
 import { fmtBytes } from "../../lib/format";
 import { useStats } from "../../store/stats";
 import { activeConversation, type LaunchWhat, useWorkspace } from "../../store/workspace";
@@ -23,11 +23,14 @@ export default function Sidebar() {
   const [detected, setDetected] = useState<DetectedAgent[]>([]);
   const [picker, setPicker] = useState(false);
   const [custom, setCustom] = useState("");
+  const [isolate, setIsolate] = useState(false);
+  const [distros, setDistros] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void detectAgents().then(setDetected).catch(() => {});
     const un = onRegistryChanged(setDetected);
+    void listWslDistros().then(setDistros).catch(() => {});
     return () => void un.then((f) => f());
   }, []);
 
@@ -42,7 +45,7 @@ export default function Sidebar() {
     setCustom("");
     setError(null);
     try {
-      await launch(activeProjectId, what);
+      await launch(activeProjectId, what, { isolate });
     } catch (e) {
       // Tauri command errors arrive as plain strings.
       setError(typeof e === "string" ? e : String(e));
@@ -102,6 +105,15 @@ export default function Sidebar() {
             </button>
           ))}
           {detected.length === 0 && <small>No CLIs detected.</small>}
+          {distros.map((d) => (
+            <button key={d} title="A shell inside this WSL distro, in the project folder" onClick={() => void start({ wslDistro: d })}>
+              WSL · {d}
+            </button>
+          ))}
+          <label className="sb-check" title="Run the next agent in its own git worktree and branch (needs a git project)">
+            <input type="checkbox" checked={isolate} onChange={(e) => setIsolate(e.target.checked)} />
+            Isolate in worktree
+          </label>
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -123,6 +135,7 @@ export default function Sidebar() {
           <li key={a.id} className={runtime[a.id]?.ptyId && !runtime[a.id].exited ? "" : "exited"}>
             <span className="sb-main">
               {a.name}
+              {a.worktree && <small title={a.worktree.path}> ⎇</small>}
               {a.hibernated && <small> hibernated</small>}
             </span>
             {(() => {
