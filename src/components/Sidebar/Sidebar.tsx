@@ -72,6 +72,25 @@ export default function Sidebar() {
     closeAgent(id);
   };
 
+  // Removing a project stops every agent in it, in all its conversations.
+  const remove = async (projectId: string) => {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return;
+    const running = project.conversations
+      .flatMap((c) => c.agents)
+      .filter((a) => runtime[a.id]?.ptyId && !runtime[a.id].exited).length;
+    if (running > 0) {
+      const agents = running === 1 ? "1 running agent" : `${running} running agents`;
+      const ok = await ask(`Remove ${project.name}? ${agents} will be stopped. The folder itself is not deleted.`, {
+        title: "Remove project",
+        kind: "warning",
+        okLabel: "Remove",
+      });
+      if (!ok) return;
+    }
+    removeProject(projectId);
+  };
+
   const active = projects.find((p) => p.id === activeProjectId);
   const mine = active ? activeConversation(active).agents : [];
 
@@ -92,7 +111,7 @@ export default function Sidebar() {
               );
               return bytes > 0 && <small className="sb-stats">{fmtBytes(bytes)}</small>;
             })()}
-            <button className="sb-act" aria-label={`Remove ${p.name}`} title="Remove project" onClick={() => removeProject(p.id)}>×</button>
+            <button className="sb-act" aria-label={`Remove ${p.name}`} title="Remove project" onClick={() => void remove(p.id)}>×</button>
           </li>
         ))}
       </ul>
