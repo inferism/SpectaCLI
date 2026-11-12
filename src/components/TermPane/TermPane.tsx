@@ -113,7 +113,11 @@ export default function TermPane({ ptyId, visible, name, rawName, onRename, maxi
             </button>
           </>
         )}
-        <button aria-label={maximized ? "Restore pane" : "Maximize pane"} onClick={onToggleMaximize}>
+        <button
+          aria-label={maximized ? "Restore pane" : "Maximize pane"}
+          title={`${maximized ? "Restore" : "Maximize"} (Ctrl+Shift+Enter)`}
+          onClick={onToggleMaximize}
+        >
           {maximized ? "❐" : "▢"}
         </button>
       </header>

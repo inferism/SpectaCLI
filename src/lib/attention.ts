@@ -4,6 +4,7 @@ import { type InboxItem, inboxKind, useInbox } from "../store/inbox";
 import { useStatus } from "../store/status";
 import { activeConversation, soloAgentId, useWorkspace } from "../store/workspace";
 import type { AgentStatus } from "./ipc";
+import { focusPty } from "./keys";
 import { shouldToast } from "./toast";
 
 const lastToast = new Map<string, number>();
@@ -90,9 +91,7 @@ export function openInboxItem(item: InboxItem) {
   ws.revealAgent(item.projectId, item.instanceId);
   useInbox.getState().remove(item.id);
   // The pane's terminal mounts on the next render.
-  window.setTimeout(() => {
-    document.querySelector<HTMLElement>(`[data-pty="${item.ptyId}"] .xterm-helper-textarea`)?.focus();
-  }, 150);
+  focusPty(item.ptyId, 150);
 }
 
 /** Keep "(N waiting)" in the OS window title (taskbar, Alt+Tab). Returns an unsubscribe. */

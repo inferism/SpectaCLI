@@ -8,6 +8,7 @@ import { flushSave, startPersistence } from "./store/persist";
 import { useStats } from "./store/stats";
 import { recordStatus, startWaitingTitle } from "./lib/attention";
 import { startAutoHibernate } from "./lib/hibernate";
+import { startPaneKeys } from "./lib/keys";
 import { useWorkspace } from "./store/workspace";
 
 export default function App() {
@@ -18,11 +19,13 @@ export default function App() {
     const unPersist = startPersistence();
     const stopAutoHibernate = startAutoHibernate();
     const stopWaitingTitle = startWaitingTitle();
+    const stopPaneKeys = startPaneKeys();
     // The window closes once this resolves, so the last change is on disk.
     const unClose = getCurrentWindow().onCloseRequested(() => flushSave());
     return () => {
       stopAutoHibernate();
       stopWaitingTitle();
+      stopPaneKeys();
       void un.then((f) => f());
       void unStats.then((f) => f());
       void unStatus.then((f) => f());
