@@ -1,4 +1,4 @@
-import { open } from "@tauri-apps/plugin-dialog";
+import { ask, open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { type DetectedAgent, detectAgents, listWslDistros, onRegistryChanged } from "../../lib/ipc";
 import { fmtBytes } from "../../lib/format";
@@ -60,6 +60,16 @@ export default function Sidebar() {
     }
   };
 
+  // Closing kills the CLI, so ask first while it is busy or waiting on you.
+  const close = async (id: string, name: string) => {
+    const st = statusOf[runtime[id]?.ptyId ?? ""]?.status;
+    if (st === "working" || st === "needs_input") {
+      const what = st === "working" ? "is still working" : "is waiting for your input";
+      if (!(await ask(`${name} ${what}. Close it anyway?`, { title: "Close agent", kind: "warning" }))) return;
+    }
+    closeAgent(id);
+  };
+
   const active = projects.find((p) => p.id === activeProjectId);
   const mine = active ? activeConversation(active).agents : [];
 
@@ -80,7 +90,7 @@ export default function Sidebar() {
               );
               return bytes > 0 && <small className="sb-stats">{fmtBytes(bytes)}</small>;
             })()}
-            <button aria-label={`Remove ${p.name}`} onClick={() => removeProject(p.id)}>×</button>
+            <button className="sb-act" aria-label={`Remove ${p.name}`} title="Remove project" onClick={() => removeProject(p.id)}>×</button>
           </li>
         ))}
       </ul>
@@ -155,10 +165,10 @@ export default function Sidebar() {
               {a.worktree && <small title={a.worktree.path}> ⎇</small>}
               {a.hibernated && <small> hibernated</small>}
             </span>
-            <button aria-label={`Rename ${a.name}`} title="Rename" onClick={() => setRenamingId(a.id)}>
+            <button className="sb-act" aria-label={`Rename ${a.name}`} title="Rename" onClick={() => setRenamingId(a.id)}>
               ✎
             </button>
-            <button aria-label={`Close ${a.name}`} onClick={() => closeAgent(a.id)}>×</button>
+            <button className="sb-act" aria-label={`Close ${a.name}`} title="Close agent" onClick={() => void close(a.id, a.name)}>×</button>
           </li>
         ))}
       </ul>
