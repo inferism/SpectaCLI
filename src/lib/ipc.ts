@@ -47,13 +47,14 @@ let lastAttachId = Date.now();
 export const newAttachId = () => ++lastAttachId;
 
 /**
- * Stream an agent's output to `onData`: the scrollback first, then live
- * batches, in order. Replaces any pane already attached to this agent.
+ * Stream an agent's output: the scrollback to `onReplay` first, then live
+ * batches to `onData`, in order. Replaces any pane already attached to this agent.
  */
 export async function attachAgent(
   agentId: string,
   attachId: number,
   onData: (bytes: Uint8Array) => void,
+  onReplay: (bytes: Uint8Array) => void = onData,
 ): Promise<void> {
   // Live batches can arrive before the scrollback response; hold them until
   // the scrollback has been written. The two never overlap (Rust guarantees it).
@@ -65,7 +66,7 @@ export async function attachAgent(
     else onData(bytes);
   };
   const scrollback = await invoke<ArrayBuffer>("attach_agent", { agentId, attachId, onOutput });
-  onData(new Uint8Array(scrollback));
+  onReplay(new Uint8Array(scrollback));
   early.forEach(onData);
   early = null;
 }
