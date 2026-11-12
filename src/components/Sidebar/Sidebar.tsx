@@ -147,10 +147,6 @@ export default function Sidebar() {
               {a.worktree && <small title={a.worktree.path}> ⎇</small>}
               {a.hibernated && <small> hibernated</small>}
             </span>
-            {(() => {
-              const u = runtime[a.id]?.ptyId ? tick?.agents[runtime[a.id].ptyId!] : undefined;
-              return u && <small className="sb-stats" title={`${u.processes} processes`}>{fmtBytes(u.privateBytes)}</small>;
-            })()}
             <button aria-label={`Rename ${a.name}`} title="Rename" onClick={() => setRenamingId(a.id)}>
               ✎
             </button>
