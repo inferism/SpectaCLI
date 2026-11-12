@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.spectacli.app",
   "build": {
-    "beforeDevCommand": "npm run dev",
+    "beforeDevCommand": "npm run notify && npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run build",
+    "beforeBuildCommand": "npm run notify -- --release && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -25,6 +25,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "externalBin": ["binaries/spectacli-notify"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

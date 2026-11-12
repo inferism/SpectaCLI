@@ -1,0 +1,8 @@
+[package]
+name = "spectacli-notify"
+version = "0.1.0"
+description = "Hook helper: forwards a CLI's status event to SpectaCLI over its named pipe"
+authors = ["inferism"]
+edition = "2024"
+
+[dependencies]

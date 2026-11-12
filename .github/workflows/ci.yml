@@ -24,7 +24,8 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      - run: cargo clippy --all-targets -- -D warnings
+      - run: npm run notify
+      - run: cargo clippy --workspace --all-targets -- -D warnings
         working-directory: src-tauri
       - run: cargo test
         working-directory: src-tauri

@@ -8,6 +8,7 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
+    "notify": "node scripts/build-notify.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
