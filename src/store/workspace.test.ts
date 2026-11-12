@@ -300,3 +300,30 @@ test("selectConversation ignores an unknown id, and revealAgent switches to the 
   expect(ws().projects[0].activeConversationId).toBe(firstConv);
   expect(activeConversation(ws().projects[0]).layout.focusedAgentId).toBe(first);
 });
+
+test("revealing an agent in another conversation starts that conversation's saved agents", async () => {
+  ws().hydrate({
+    schemaVersion: 1,
+    activeProjectId: "p1",
+    projects: [
+      {
+        id: "p1",
+        name: "a",
+        path: "C:\a",
+        createdAt: "t",
+        lastOpenedAt: "t",
+        activeConversationId: "c1",
+        conversations: [
+          { id: "c1", title: "One", createdAt: "t", agents: [], layout: { mode: "grid", focusedAgentId: null, maximizedAgentId: null } },
+          { id: "c2", title: "Two", createdAt: "t", agents: [saved("x1", { sessionId: "s-x" }), saved("x2", { sessionId: "s-y" })], layout: { mode: "grid", focusedAgentId: null, maximizedAgentId: null } },
+        ],
+      },
+    ],
+  } as never);
+  await tick();
+  expect(spawns).toEqual([]);
+  ws().revealAgent("p1", "x1");
+  await tick();
+  expect(ws().projects[0].activeConversationId).toBe("c2");
+  expect(spawns).toEqual([{ sessionId: "s-x", resume: true }, { sessionId: "s-y", resume: true }]);
+});

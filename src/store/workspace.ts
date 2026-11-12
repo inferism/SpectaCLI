@@ -486,7 +486,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         })),
       })),
 
-    revealAgent: (projectId, instanceId) =>
+    revealAgent: (projectId, instanceId) => {
       set((s) => ({
         projects: s.projects.map((p) => {
           if (p.id !== projectId) return p;
@@ -510,6 +510,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             ),
           };
         }),
-      })),
+      }));
+      // Start the other saved agents of the conversation it switched to.
+      void get().restoreProject(projectId);
+    },
   };
 });
