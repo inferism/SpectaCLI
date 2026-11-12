@@ -15,6 +15,7 @@ export interface AgentDef {
   configDirEnv: string | null;
   imagePaste: "path" | "native" | null;
   submit: string;
+  exitKeys: string[];
 }
 
 export interface LaunchSpec {
@@ -38,8 +39,35 @@ export const onRegistryChanged = (cb: (agents: DetectedAgent[]) => void): Promis
 
 // --- Agents in PTYs (src-tauri/src/pty) ---
 
-export const spawnAgent = (agentDefId: string, cwd: string, cols: number, rows: number) =>
-  invoke<string>("spawn_agent", { agentDefId, cwd, cols, rows });
+export interface Spawned {
+  agentId: string;
+  /** The id the CLI was told to use (CLIs that take one); save it to resume. */
+  sessionId: string | null;
+  /** The launch continued an earlier session. */
+  resumed: boolean;
+  /** The CLI can resume at all, so the agent can be hibernated. */
+  resumable: boolean;
+}
+
+export interface SessionOpts {
+  sessionId?: string | null;
+  /** Continue `sessionId` (or the CLI's latest session in this folder); a new session when the CLI can't. */
+  resume?: boolean;
+}
+
+export const spawnAgent = (agentDefId: string, cwd: string, cols: number, rows: number, session: SessionOpts = {}) =>
+  invoke<Spawned>("spawn_agent", {
+    agentDefId,
+    cwd,
+    cols,
+    rows,
+    sessionId: session.sessionId ?? null,
+    resume: session.resume ?? false,
+  });
+
+/** Ask the CLI to quit (registry exit keys), then end its tree. Resolves once it is gone. */
+export const hibernateAgent = (agentId: string, agentDefId: string) =>
+  invoke<void>("hibernate_agent", { agentId, agentDefId });
 
 // Starts from the clock so ids stay unique across a webview reload.
 let lastAttachId = Date.now();

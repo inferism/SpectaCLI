@@ -3,16 +3,23 @@ import { beforeEach, expect, test, vi } from "vitest";
 let nextPty = 0;
 let spawnGate: Promise<void> = Promise.resolve();
 const killed: string[] = [];
+const hibernated: string[] = [];
+/** Every spawnAgent call's session options. */
+const spawns: { sessionId?: string | null; resume?: boolean }[] = [];
 vi.mock("../lib/ipc", () => ({
-  spawnAgent: async () => {
+  // Like the Claude registry entry: an id up front, resume by it.
+  spawnAgent: async (_def: string, _cwd: string, _c: number, _r: number, s: { sessionId?: string | null; resume?: boolean } = {}) => {
+    spawns.push(s);
     await spawnGate;
-    return `pty-${++nextPty}`;
+    const resumed = !!(s.resume && s.sessionId);
+    return { agentId: `pty-${++nextPty}`, sessionId: s.sessionId ?? `sess-${nextPty}`, resumed, resumable: true };
   },
   spawnCustom: async () => {
     await spawnGate;
     return `pty-${++nextPty}`;
   },
   killAgent: async (id: string) => void killed.push(id),
+  hibernateAgent: async (id: string) => void hibernated.push(id),
 }));
 
 const { activeConversation, soloAgentId, toFile, useWorkspace } = await import("./workspace");
@@ -22,6 +29,8 @@ const agentsOf = (projectId: string) => activeConversation(ws().projects.find((p
 beforeEach(() => {
   useWorkspace.setState({ hydrated: false, fileExtra: {}, projects: [], activeProjectId: null, runtime: {} });
   killed.length = 0;
+  hibernated.length = 0;
+  spawns.length = 0;
   spawnGate = Promise.resolve();
 });
 
@@ -156,4 +165,105 @@ test("revealAgent focuses the agent and moves a maximize onto it", async () => {
   ws().setLayoutMode(p, "focus");
   ws().revealAgent(p, a);
   expect(soloAgentId(conv())).toBe(a);
+});
+
+const claude = { defId: "claude", name: "Claude Code" };
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+function savedProject(agents: object[]) {
+  ws().hydrate({
+    schemaVersion: 1,
+    activeProjectId: "p1",
+    projects: [
+      {
+        id: "p1",
+        name: "a",
+        path: "C:\a",
+        createdAt: "t",
+        lastOpenedAt: "t",
+        activeConversationId: "c1",
+        conversations: [{ id: "c1", title: "Default", createdAt: "t", agents, layout: { mode: "grid", focusedAgentId: null, maximizedAgentId: null } }],
+      },
+    ],
+  } as never);
+}
+
+const saved = (id: string, extra: object = {}) => ({ id, launch: { kind: "def", agentDefId: "claude" }, name: "Claude Code", cwd: "C:\a", ...extra });
+
+test("a new agent saves the session id its CLI was given", async () => {
+  ws().addProject("C:\a");
+  const id = (await ws().launch(ws().activeProjectId!, claude))!;
+  expect(spawns).toEqual([{}]);
+  expect(agentsOf(ws().activeProjectId!)[0].sessionId).toBe(`sess-${nextPty}`);
+  expect(JSON.stringify(toFile(ws()))).toContain(`sess-${nextPty}`);
+  expect(ws().runtime[id]).toMatchObject({ resumable: true, resumedAt: null });
+});
+
+test("restore resumes saved sessions and leaves hibernated agents alone", async () => {
+  savedProject([saved("a1", { sessionId: "s-a" }), saved("a2", { sessionId: "s-b", hibernated: true })]);
+  await tick();
+  expect(spawns).toEqual([{ sessionId: "s-a", resume: true }]);
+  expect(ws().runtime.a1.resumedAt).not.toBeNull();
+  expect(ws().runtime.a2).toBeUndefined();
+});
+
+test("a resume that fails at once starts a new session with the same id, once", async () => {
+  savedProject([saved("f1", { sessionId: "s-a" })]);
+  await tick();
+  ws().markExited(ws().runtime.f1.ptyId!, 1);
+  await tick();
+  expect(spawns).toEqual([
+    { sessionId: "s-a", resume: true },
+    { sessionId: "s-a", resume: false },
+  ]);
+  expect(ws().runtime.f1).toMatchObject({ exited: false, note: "new session", resumedAt: null });
+  // A later failure is not retried.
+  ws().markExited(ws().runtime.f1.ptyId!, 1);
+  await tick();
+  expect(spawns).toHaveLength(2);
+});
+
+test("a clean exit after resuming is not treated as a failed resume", async () => {
+  savedProject([saved("k1", { sessionId: "s-a" })]);
+  await tick();
+  ws().markExited(ws().runtime.k1.ptyId!, 0);
+  await tick();
+  expect(spawns).toHaveLength(1);
+  expect(ws().runtime.k1.exited).toBe(true);
+});
+
+test("hibernate stops the process and resume continues the session", async () => {
+  ws().addProject("C:\a");
+  const id = (await ws().launch(ws().activeProjectId!, claude))!;
+  const pty = ws().runtime[id].ptyId!;
+  const session = agentsOf(ws().activeProjectId!)[0].sessionId;
+  await ws().hibernate(id);
+  expect(hibernated).toEqual([pty]);
+  expect(ws().runtime[id]).toBeUndefined();
+  expect(agentsOf(ws().activeProjectId!)[0].hibernated).toBe(true);
+  // Its exit event arrives later and changes nothing.
+  ws().markExited(pty, 1);
+  expect(spawns).toHaveLength(1);
+
+  await ws().resume(id);
+  expect(spawns[1]).toEqual({ sessionId: session, resume: true });
+  expect(agentsOf(ws().activeProjectId!)[0].hibernated).toBe(false);
+  expect(ws().runtime[id].ptyId).not.toBe(pty);
+});
+
+test("custom commands cannot be hibernated", async () => {
+  ws().addProject("C:\a");
+  const id = (await ws().launch(ws().activeProjectId!, { command: "x" }))!;
+  await ws().hibernate(id);
+  expect(hibernated).toEqual([]);
+  expect(ws().runtime[id].ptyId).not.toBeNull();
+});
+
+test("auto-hibernate minutes are saved and cleared", async () => {
+  ws().addProject("C:\a");
+  const id = (await ws().launch(ws().activeProjectId!, claude))!;
+  ws().setAutoHibernate(id, 15);
+  expect(agentsOf(ws().activeProjectId!)[0].autoHibernateMin).toBe(15);
+  ws().setAutoHibernate(id, null);
+  expect("autoHibernateMin" in agentsOf(ws().activeProjectId!)[0]).toBe(false);
 });

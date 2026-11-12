@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { killAgent, spawnAgent, spawnCustom } from "../lib/ipc";
+import { hibernateAgent, killAgent, type SessionOpts, spawnAgent, spawnCustom } from "../lib/ipc";
 
 // --- Persisted shape (projects.json, PLAN.md section 4) ---
 // Objects are only ever updated by spreading, so fields written by a newer
@@ -13,6 +13,12 @@ export interface AgentInstance {
   launch: AgentLaunch;
   name: string;
   cwd: string;
+  /** The CLI's own session id, for CLIs that take one up front (Claude). */
+  sessionId?: string;
+  /** Stopped to free its memory; resumes its session when clicked. */
+  hibernated?: boolean;
+  /** Hibernate after this many idle minutes. Unset: never. */
+  autoHibernateMin?: number;
 }
 
 export interface Layout {
@@ -54,6 +60,12 @@ export interface AgentRuntime {
   /** null until launched in this app session. */
   ptyId: string | null;
   exited: boolean;
+  /** The CLI can resume its session, so it can be hibernated. */
+  resumable: boolean;
+  /** When this process was started to continue an earlier session; null for a new one. */
+  resumedAt: number | null;
+  /** Shown next to the name, e.g. when a resume failed and a new session started. */
+  note?: string;
 }
 
 export type LaunchWhat = { defId: string; name: string } | { command: string };
@@ -74,16 +86,24 @@ interface WorkspaceState {
   /** Start an agent in `projectId`. Resolves to the new instance id, or null if the project went away meanwhile. */
   launch: (projectId: string, what: LaunchWhat) => Promise<string | null>;
   closeAgent: (instanceId: string) => void;
-  /** Relaunch the saved agents of a project that have no process yet (once per app session each). */
+  /** Resume the saved, non-hibernated agents of a project that have no process yet (once per app session each). */
   restoreProject: (projectId: string) => Promise<void>;
   /** From `agent:exit`, which reports the PTY id. */
-  markExited: (ptyId: string) => void;
+  markExited: (ptyId: string, code?: number | null) => void;
+  /** Stop a resumable agent to free its memory, keeping its session. */
+  hibernate: (instanceId: string) => Promise<void>;
+  /** Relaunch a hibernated agent with its session. */
+  resume: (instanceId: string) => Promise<void>;
+  setAutoHibernate: (instanceId: string, minutes: number | null) => void;
   toggleMaximize: (projectId: string, instanceId: string) => void;
   setLayoutMode: (projectId: string, mode: Layout["mode"]) => void;
   focusAgent: (projectId: string, instanceId: string) => void;
   /** Make sure `instanceId` is on screen in its project (focus tab, or the maximized pane), e.g. from an inbox click. */
   revealAgent: (projectId: string, instanceId: string) => void;
 }
+
+/** A resumed CLI that fails within this time had nothing to resume (e.g. Claude's "No conversation found"). */
+export const RESUME_FAIL_MS = 15_000;
 
 const now = () => new Date().toISOString();
 const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
@@ -141,209 +161,312 @@ function updateConversation(projects: Project[], projectId: string, fn: (c: Conv
   );
 }
 
+/** Update one agent wherever it is. */
+function updateInstance(projects: Project[], instanceId: string, fn: (a: AgentInstance) => AgentInstance): Project[] {
+  return projects.map((p) =>
+    p.conversations.some((c) => c.agents.some((a) => a.id === instanceId))
+      ? {
+          ...p,
+          conversations: p.conversations.map((c) => ({
+            ...c,
+            agents: c.agents.map((a) => (a.id === instanceId ? fn(a) : a)),
+          })),
+        }
+      : p,
+  );
+}
+
 const projectOf = (projects: Project[], instanceId: string) =>
   projects.find((p) => p.conversations.some((c) => c.agents.some((a) => a.id === instanceId)));
 
-/** PTYs that exited before `launch` recorded them (a command that fails at once). */
-const earlyExits = new Set<string>();
+export const findInstance = (projects: Project[], instanceId: string): AgentInstance | undefined => {
+  for (const p of projects) for (const c of p.conversations) for (const a of c.agents) if (a.id === instanceId) return a;
+  return undefined;
+};
+
+interface Started {
+  ptyId: string;
+  sessionId: string | null;
+  resumed: boolean;
+  resumable: boolean;
+}
+
+async function spawnFor(launch: AgentLaunch, cwd: string, session: SessionOpts): Promise<Started> {
+  if (launch.kind === "custom") {
+    const ptyId = await spawnCustom(launch.command, cwd, 80, 24);
+    return { ptyId, sessionId: null, resumed: false, resumable: false };
+  }
+  const s = await spawnAgent(launch.agentDefId, cwd, 80, 24, session);
+  return { ptyId: s.agentId, sessionId: s.sessionId, resumed: s.resumed, resumable: s.resumable };
+}
+
+/** PTYs that exited before a launch recorded them (a command that fails at once), with their exit code. */
+const earlyExits = new Map<string, number | null>();
 /** Only while a launch is in flight can an unknown exit be an early one. */
 let launching = 0;
 /** Saved agents already tried this session, so a failing one is not retried in a loop. */
 const restoreTried = new Set<string>();
+/** Agents whose failed resume already fell back to a new session. */
+const resumeFellBack = new Set<string>();
 
 export function toFile(s: Pick<WorkspaceState, "fileExtra" | "projects" | "activeProjectId">): ProjectsFile {
   return { ...s.fileExtra, schemaVersion: 1, activeProjectId: s.activeProjectId, projects: s.projects };
 }
 
-export const useWorkspace = create<WorkspaceState>((set, get) => ({
-  hydrated: false,
-  fileExtra: {},
-  projects: [],
-  activeProjectId: null,
-  runtime: {},
-
-  hydrate: (file) => {
-    if (!file) return set({ hydrated: true });
-    const { schemaVersion: _v, activeProjectId, projects, ...fileExtra } = file;
-    const ps = (projects ?? []).map(normalizeProject);
-    const active = ps.some((p) => p.id === activeProjectId) ? activeProjectId : (ps[0]?.id ?? null);
-    set({ hydrated: true, fileExtra, projects: ps, activeProjectId: active });
-    // Only the last project wakes up; the others stay hibernated until selected.
-    if (active) void get().restoreProject(active);
-  },
-
-  addProject: (path) => {
-    const existing = get().projects.find((p) => samePath(p.path, path));
-    if (existing) return get().selectProject(existing.id);
-    const conv = newConversation();
-    const project: Project = {
-      id: crypto.randomUUID(),
-      name: baseName(path),
-      path,
-      createdAt: now(),
-      lastOpenedAt: now(),
-      conversations: [conv],
-      activeConversationId: conv.id,
-    };
-    set((s) => ({ projects: [...s.projects, project], activeProjectId: project.id }));
-  },
-
-  selectProject: (id) => {
-    set((s) => ({
-      activeProjectId: id,
-      projects: s.projects.map((p) => (p.id === id ? { ...p, lastOpenedAt: now() } : p)),
-    }));
-    void get().restoreProject(id);
-  },
-
-  removeProject: (id) => {
-    const project = get().projects.find((p) => p.id === id);
-    if (!project) return;
-    const ids = project.conversations.flatMap((c) => c.agents.map((a) => a.id));
-    for (const i of ids) {
-      const pty = get().runtime[i]?.ptyId;
-      if (pty) void killAgent(pty).catch(() => {});
-    }
-    set((s) => {
-      const projects = s.projects.filter((p) => p.id !== id);
-      const runtime = { ...s.runtime };
-      ids.forEach((i) => delete runtime[i]);
-      return {
-        projects,
-        runtime,
-        activeProjectId: s.activeProjectId === id ? (projects[0]?.id ?? null) : s.activeProjectId,
-      };
-    });
-  },
-
-  launch: async (projectId, what) => {
-    const project = get().projects.find((p) => p.id === projectId);
-    if (!project) return null;
-    let ptyId: string;
+export const useWorkspace = create<WorkspaceState>((set, get) => {
+  /**
+   * Start a saved agent's process and record it. Started agents that were
+   * closed or hibernated meanwhile are killed again.
+   */
+  async function startSaved(instanceId: string, session: { resume: boolean }, note?: string): Promise<void> {
+    const a = findInstance(get().projects, instanceId);
+    if (!a) return;
+    let r: Started;
     launching++;
     try {
-      ptyId =
-        "defId" in what
-          ? await spawnAgent(what.defId, project.path, 80, 24)
-          : await spawnCustom(what.command, project.path, 80, 24);
+      r = await spawnFor(a.launch, a.cwd, { sessionId: a.sessionId, resume: session.resume });
+    } catch (e) {
+      console.error(`start ${a.name}:`, e);
+      return;
     } finally {
       launching--;
     }
-    // The project may have been removed while the process was starting.
-    if (!get().projects.some((p) => p.id === projectId)) {
-      earlyExits.delete(ptyId);
-      void killAgent(ptyId).catch(() => {});
-      return null;
-    }
-    const instance: AgentInstance = {
-      id: crypto.randomUUID(),
-      launch: "defId" in what ? { kind: "def", agentDefId: what.defId } : { kind: "custom", command: what.command },
-      name: "defId" in what ? what.name : what.command,
-      cwd: project.path,
-    };
-    const exited = earlyExits.delete(ptyId);
-    set((s) => ({
-      projects: updateConversation(s.projects, projectId, (c) => ({ ...c, agents: [...c.agents, instance] })),
-      runtime: { ...s.runtime, [instance.id]: { ptyId, exited } },
-    }));
-    return instance.id;
-  },
-
-  restoreProject: async (projectId) => {
-    const project = get().projects.find((p) => p.id === projectId);
-    if (!project) return;
-    const todo = activeConversation(project).agents.filter((a) => !get().runtime[a.id] && !restoreTried.has(a.id));
-    await Promise.all(
-      todo.map(async (a) => {
-        restoreTried.add(a.id);
-        let ptyId: string;
-        launching++;
-        try {
-          ptyId =
-            a.launch.kind === "def"
-              ? await spawnAgent(a.launch.agentDefId, a.cwd, 80, 24)
-              : await spawnCustom(a.launch.command, a.cwd, 80, 24);
-        } catch (e) {
-          console.error(`restore ${a.name}:`, e);
-          return;
-        } finally {
-          launching--;
-        }
-        // Closed or removed while starting.
-        if (!projectOf(get().projects, a.id)) {
-          earlyExits.delete(ptyId);
-          void killAgent(ptyId).catch(() => {});
-          return;
-        }
-        const exited = earlyExits.delete(ptyId);
-        set((s) => ({ runtime: { ...s.runtime, [a.id]: { ptyId, exited } } }));
-      }),
-    );
-  },
-
-  closeAgent: (instanceId) => {
-    const pty = get().runtime[instanceId]?.ptyId;
-    if (pty) void killAgent(pty).catch(() => {});
-    const project = projectOf(get().projects, instanceId);
-    set((s) => {
-      const runtime = { ...s.runtime };
-      delete runtime[instanceId];
-      return {
-        runtime,
-        projects: project
-          ? updateConversation(s.projects, project.id, (c) => ({
-              ...c,
-              agents: c.agents.filter((a) => a.id !== instanceId),
-              layout: {
-                ...c.layout,
-                maximizedAgentId: c.layout.maximizedAgentId === instanceId ? null : c.layout.maximizedAgentId,
-                focusedAgentId: c.layout.focusedAgentId === instanceId ? null : c.layout.focusedAgentId,
-              },
-            }))
-          : s.projects,
-      };
-    });
-  },
-
-  markExited: (ptyId) => {
-    const entry = Object.entries(get().runtime).find(([, r]) => r.ptyId === ptyId);
-    if (!entry) {
-      if (launching > 0) earlyExits.add(ptyId);
+    const still = findInstance(get().projects, instanceId);
+    if (!still || still.hibernated) {
+      earlyExits.delete(r.ptyId);
+      void killAgent(r.ptyId).catch(() => {});
       return;
     }
-    set((s) => ({ runtime: { ...s.runtime, [entry[0]]: { ...entry[1], exited: true } } }));
-  },
-
-  toggleMaximize: (projectId, instanceId) =>
+    const early = earlyExits.has(r.ptyId);
+    const code = earlyExits.get(r.ptyId);
+    earlyExits.delete(r.ptyId);
     set((s) => ({
-      projects: updateConversation(s.projects, projectId, (c) => ({
-        ...c,
-        layout: { ...c.layout, maximizedAgentId: c.layout.maximizedAgentId === instanceId ? null : instanceId },
+      projects:
+        r.sessionId && r.sessionId !== still.sessionId
+          ? updateInstance(s.projects, instanceId, (x) => ({ ...x, sessionId: r.sessionId! }))
+          : s.projects,
+      runtime: {
+        ...s.runtime,
+        [instanceId]: { ptyId: r.ptyId, exited: false, resumable: r.resumable, resumedAt: r.resumed ? Date.now() : null, note },
+      },
+    }));
+    if (early) get().markExited(r.ptyId, code);
+  }
+
+  return {
+    hydrated: false,
+    fileExtra: {},
+    projects: [],
+    activeProjectId: null,
+    runtime: {},
+
+    hydrate: (file) => {
+      if (!file) return set({ hydrated: true });
+      const { schemaVersion: _v, activeProjectId, projects, ...fileExtra } = file;
+      const ps = (projects ?? []).map(normalizeProject);
+      const active = ps.some((p) => p.id === activeProjectId) ? activeProjectId : (ps[0]?.id ?? null);
+      set({ hydrated: true, fileExtra, projects: ps, activeProjectId: active });
+      // Only the last project wakes up; the others stay hibernated until selected.
+      if (active) void get().restoreProject(active);
+    },
+
+    addProject: (path) => {
+      const existing = get().projects.find((p) => samePath(p.path, path));
+      if (existing) return get().selectProject(existing.id);
+      const conv = newConversation();
+      const project: Project = {
+        id: crypto.randomUUID(),
+        name: baseName(path),
+        path,
+        createdAt: now(),
+        lastOpenedAt: now(),
+        conversations: [conv],
+        activeConversationId: conv.id,
+      };
+      set((s) => ({ projects: [...s.projects, project], activeProjectId: project.id }));
+    },
+
+    selectProject: (id) => {
+      set((s) => ({
+        activeProjectId: id,
+        projects: s.projects.map((p) => (p.id === id ? { ...p, lastOpenedAt: now() } : p)),
+      }));
+      void get().restoreProject(id);
+    },
+
+    removeProject: (id) => {
+      const project = get().projects.find((p) => p.id === id);
+      if (!project) return;
+      const ids = project.conversations.flatMap((c) => c.agents.map((a) => a.id));
+      for (const i of ids) {
+        const pty = get().runtime[i]?.ptyId;
+        if (pty) void killAgent(pty).catch(() => {});
+      }
+      set((s) => {
+        const projects = s.projects.filter((p) => p.id !== id);
+        const runtime = { ...s.runtime };
+        ids.forEach((i) => delete runtime[i]);
+        return {
+          projects,
+          runtime,
+          activeProjectId: s.activeProjectId === id ? (projects[0]?.id ?? null) : s.activeProjectId,
+        };
+      });
+    },
+
+    launch: async (projectId, what) => {
+      const project = get().projects.find((p) => p.id === projectId);
+      if (!project) return null;
+      const launch: AgentLaunch =
+        "defId" in what ? { kind: "def", agentDefId: what.defId } : { kind: "custom", command: what.command };
+      let r: Started;
+      launching++;
+      try {
+        r = await spawnFor(launch, project.path, {});
+      } finally {
+        launching--;
+      }
+      // The project may have been removed while the process was starting.
+      if (!get().projects.some((p) => p.id === projectId)) {
+        earlyExits.delete(r.ptyId);
+        void killAgent(r.ptyId).catch(() => {});
+        return null;
+      }
+      const instance: AgentInstance = {
+        id: crypto.randomUUID(),
+        launch,
+        name: "defId" in what ? what.name : what.command,
+        cwd: project.path,
+        ...(r.sessionId ? { sessionId: r.sessionId } : {}),
+      };
+      const exited = earlyExits.delete(r.ptyId);
+      set((s) => ({
+        projects: updateConversation(s.projects, projectId, (c) => ({ ...c, agents: [...c.agents, instance] })),
+        runtime: { ...s.runtime, [instance.id]: { ptyId: r.ptyId, exited, resumable: r.resumable, resumedAt: null } },
+      }));
+      return instance.id;
+    },
+
+    restoreProject: async (projectId) => {
+      const project = get().projects.find((p) => p.id === projectId);
+      if (!project) return;
+      const todo = activeConversation(project).agents.filter(
+        (a) => !a.hibernated && !get().runtime[a.id] && !restoreTried.has(a.id),
+      );
+      await Promise.all(
+        todo.map((a) => {
+          restoreTried.add(a.id);
+          return startSaved(a.id, { resume: true });
+        }),
+      );
+    },
+
+    closeAgent: (instanceId) => {
+      const pty = get().runtime[instanceId]?.ptyId;
+      if (pty) void killAgent(pty).catch(() => {});
+      const project = projectOf(get().projects, instanceId);
+      set((s) => {
+        const runtime = { ...s.runtime };
+        delete runtime[instanceId];
+        return {
+          runtime,
+          projects: project
+            ? updateConversation(s.projects, project.id, (c) => ({
+                ...c,
+                agents: c.agents.filter((a) => a.id !== instanceId),
+                layout: {
+                  ...c.layout,
+                  maximizedAgentId: c.layout.maximizedAgentId === instanceId ? null : c.layout.maximizedAgentId,
+                  focusedAgentId: c.layout.focusedAgentId === instanceId ? null : c.layout.focusedAgentId,
+                },
+              }))
+            : s.projects,
+        };
+      });
+    },
+
+    markExited: (ptyId, code = null) => {
+      const entry = Object.entries(get().runtime).find(([, r]) => r.ptyId === ptyId);
+      if (!entry) {
+        if (launching > 0) earlyExits.set(ptyId, code);
+        return;
+      }
+      const [instanceId, rt] = entry;
+      set((s) => ({ runtime: { ...s.runtime, [instanceId]: { ...rt, exited: true } } }));
+      // A resume that fails at once had nothing to resume: start a new session, once.
+      const failedResume = rt.resumedAt !== null && Date.now() - rt.resumedAt < RESUME_FAIL_MS && code !== 0;
+      if (failedResume && !resumeFellBack.has(instanceId)) {
+        resumeFellBack.add(instanceId);
+        void startSaved(instanceId, { resume: false }, "new session");
+      }
+    },
+
+    hibernate: async (instanceId) => {
+      const a = findInstance(get().projects, instanceId);
+      const rt = get().runtime[instanceId];
+      if (!a || a.launch.kind !== "def" || !rt?.ptyId || !rt.resumable) return;
+      const { ptyId } = rt;
+      const agentDefId = a.launch.agentDefId;
+      // The pane switches to "hibernated" at once; the process stops in the background.
+      set((s) => {
+        const runtime = { ...s.runtime };
+        delete runtime[instanceId];
+        return { runtime, projects: updateInstance(s.projects, instanceId, (x) => ({ ...x, hibernated: true })) };
+      });
+      try {
+        await hibernateAgent(ptyId, agentDefId);
+      } catch {
+        await killAgent(ptyId).catch(() => {});
+      }
+    },
+
+    resume: async (instanceId) => {
+      const a = findInstance(get().projects, instanceId);
+      if (!a?.hibernated) return;
+      set((s) => ({ projects: updateInstance(s.projects, instanceId, (x) => ({ ...x, hibernated: false })) }));
+      resumeFellBack.delete(instanceId);
+      await startSaved(instanceId, { resume: true });
+    },
+
+    setAutoHibernate: (instanceId, minutes) =>
+      set((s) => ({
+        projects: updateInstance(s.projects, instanceId, (x) => {
+          const { autoHibernateMin: _old, ...rest } = x;
+          return minutes ? { ...rest, autoHibernateMin: minutes } : rest;
+        }),
       })),
-    })),
 
-  setLayoutMode: (projectId, mode) =>
-    set((s) => ({
-      projects: updateConversation(s.projects, projectId, (c) => ({ ...c, layout: { ...c.layout, mode } })),
-    })),
-
-  focusAgent: (projectId, instanceId) =>
-    set((s) => ({
-      projects: updateConversation(s.projects, projectId, (c) => ({
-        ...c,
-        layout: { ...c.layout, focusedAgentId: instanceId },
+    toggleMaximize: (projectId, instanceId) =>
+      set((s) => ({
+        projects: updateConversation(s.projects, projectId, (c) => ({
+          ...c,
+          layout: { ...c.layout, maximizedAgentId: c.layout.maximizedAgentId === instanceId ? null : instanceId },
+        })),
       })),
-    })),
 
-  revealAgent: (projectId, instanceId) =>
-    set((s) => ({
-      projects: updateConversation(s.projects, projectId, (c) => ({
-        ...c,
-        layout: {
-          ...c.layout,
-          focusedAgentId: instanceId,
-          maximizedAgentId: c.layout.maximizedAgentId ? instanceId : null,
-        },
+    setLayoutMode: (projectId, mode) =>
+      set((s) => ({
+        projects: updateConversation(s.projects, projectId, (c) => ({ ...c, layout: { ...c.layout, mode } })),
       })),
-    })),
-}));
+
+    focusAgent: (projectId, instanceId) =>
+      set((s) => ({
+        projects: updateConversation(s.projects, projectId, (c) => ({
+          ...c,
+          layout: { ...c.layout, focusedAgentId: instanceId },
+        })),
+      })),
+
+    revealAgent: (projectId, instanceId) =>
+      set((s) => ({
+        projects: updateConversation(s.projects, projectId, (c) => ({
+          ...c,
+          layout: {
+            ...c.layout,
+            focusedAgentId: instanceId,
+            maximizedAgentId: c.layout.maximizedAgentId ? instanceId : null,
+          },
+        })),
+      })),
+  };
+});
