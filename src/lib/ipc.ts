@@ -90,3 +90,10 @@ export interface AgentExit {
 /** Fired after an agent's process exits and its last output was sent. */
 export const onAgentExit = (cb: (e: AgentExit) => void): Promise<UnlistenFn> =>
   listen<AgentExit>("agent:exit", (e) => cb(e.payload));
+
+// --- Store (src-tauri/src/store.rs) ---
+
+/** The saved projects.json as raw JSON, or null when there is none yet. Rejects for a file from a newer version. */
+export const loadProjects = () => invoke<unknown>("load_projects");
+/** Atomic write; keeps the previous file as projects.json.bak. */
+export const saveProjects = (file: unknown) => invoke<void>("save_projects", { file });
