@@ -1,5 +1,6 @@
 mod pty;
 mod registry;
+mod session;
 mod stats;
 mod status;
 mod store;
@@ -17,6 +18,10 @@ use tauri::{AppHandle, Emitter, Manager, State};
 /// Last detection result, so spawning doesn't re-walk PATH.
 #[derive(Default)]
 struct Detected(Mutex<Vec<DetectedAgent>>);
+
+fn lock_detected(app: &AppHandle) -> std::sync::MutexGuard<'_, Vec<DetectedAgent>> {
+    app.state::<Detected>().inner().0.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 fn detect_and_store(app: &AppHandle) -> Vec<DetectedAgent> {
     let dir = app.path().app_config_dir().ok();
@@ -79,22 +84,36 @@ struct RetryError {
     updating: bool,
 }
 
-/// Start a detected agent in `cwd`. Returns its id; attach a pane with
-/// `attach_agent`. Retries for a few seconds if the CLI is updating itself.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Spawned {
+    agent_id: String,
+    #[serde(flatten)]
+    session: session::SessionArgs,
+}
+
+/// Start a detected agent in `cwd`; attach a pane with `attach_agent`.
+/// `resume` continues `session_id` (or the CLI's latest session here) when
+/// the registry says how; otherwise it starts a new session. Retries for a
+/// few seconds if the CLI is updating itself.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 async fn spawn_agent(
     app: AppHandle,
     agent_def_id: String,
     cwd: PathBuf,
     cols: u16,
     rows: u16,
-) -> Result<String, String> {
+    session_id: Option<String>,
+    resume: Option<bool>,
+) -> Result<Spawned, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let find = |agents: &[DetectedAgent]| agents.iter().find(|a| a.def.id == agent_def_id).cloned();
         let mut name = agent_def_id.clone();
         // Chosen up front: hook arguments carry it.
         let id = uuid::Uuid::now_v7().to_string();
         let status = app.state::<StatusHub>();
+        let mut session = None;
         let result = retry_mid_update(
             |n| {
                 // Retries detect again: an update can move or replace the exe.
@@ -103,8 +122,12 @@ async fn spawn_agent(
                     .or_else(|| find(&detect_and_store(&app)))
                     .ok_or_else(|| format!("agent `{agent_def_id}` is not installed"))?;
                 name = agent.def.name.clone();
+                let s = session::args(&agent.def, session_id.as_deref(), resume.unwrap_or(false));
+                // Session args first: Codex's `resume` is a subcommand.
+                let mut args = s.args.clone();
+                session = Some(s);
                 // Tracking starts before launch so an early hook isn't lost.
-                let args = status.prepare(&id, agent.def.hook.as_ref().map(|h| h.kind.as_str()), agent.def.prompt_regex.as_deref());
+                args.extend(status.prepare(&id, agent.def.hook.as_ref().map(|h| h.kind.as_str()), agent.def.prompt_regex.as_deref()));
                 app.state::<PtyManager>().spawn(SpawnRequest {
                     id: Some(id.clone()),
                     launch: agent.launch,
@@ -117,7 +140,9 @@ async fn spawn_agent(
             },
             std::thread::sleep,
         );
-        result.map_err(|e| {
+        result
+            .map(|agent_id| Spawned { agent_id, session: session.expect("set before a successful spawn") })
+            .map_err(|e| {
             status.tracker.forget(&id);
             eprintln!("spawn {name}: {}", e.detail);
             if e.updating {
@@ -198,6 +223,22 @@ async fn kill_agent(pty: State<'_, PtyManager>, agent_id: String) -> Result<(), 
     pty.kill(&agent_id)
 }
 
+/// Gap between exit keys, and how long the CLI then gets to quit by itself.
+const EXIT_KEY_GAP: Duration = Duration::from_millis(300);
+const EXIT_GRACE: Duration = Duration::from_secs(3);
+
+/// Stop an agent so its session can be resumed later: type the registry's
+/// exit keys, wait briefly, then end the whole tree. Resolves once it is gone.
+#[tauri::command]
+async fn hibernate_agent(app: AppHandle, agent_id: String, agent_def_id: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let keys = lock_detected(&app).iter().find(|a| a.def.id == agent_def_id).map(|a| a.def.exit_keys.clone());
+        app.state::<PtyManager>().stop_gracefully(&agent_id, &keys.unwrap_or_default(), EXIT_KEY_GAP, EXIT_GRACE)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Serializes saves so two writes never race on the temp file.
 #[derive(Default)]
 struct StoreLock(Mutex<()>);
@@ -270,6 +311,7 @@ pub fn run() {
             write,
             resize,
             kill_agent,
+            hibernate_agent,
             load_projects,
             save_projects
         ])
