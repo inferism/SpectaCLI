@@ -31,7 +31,8 @@ export default function Sidebar() {
     try {
       await launch(activeProjectId, what);
     } catch (e) {
-      setError(String(e));
+      // Tauri command errors arrive as plain strings.
+      setError(typeof e === "string" ? e : String(e));
     }
   };
 
@@ -76,7 +77,12 @@ export default function Sidebar() {
           </form>
         </div>
       )}
-      {error && <div className="sb-error">{error}</div>}
+      {error && (
+        <div className="sb-error" role="alert">
+          <span title={error}>{error}</span>
+          <button aria-label="Dismiss error" onClick={() => setError(null)}>×</button>
+        </div>
+      )}
       <ul className="sb-list">
         {mine.map((a) => (
           <li key={a.id} className={runtime[a.id]?.ptyId && !runtime[a.id].exited ? "" : "exited"}>

@@ -87,7 +87,19 @@
 }
 
 .sb-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
   color: #e06c75;
   padding: 4px 10px;
   word-break: break-word;
+}
+
+/* Long OS errors stay readable: three lines here, the rest in the tooltip. */
+.sb-error span {
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
