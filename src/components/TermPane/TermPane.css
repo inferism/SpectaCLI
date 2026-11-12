@@ -7,6 +7,15 @@
   border: 1px solid #262629;
 }
 
+/* The pane that gets your typing. */
+.termpane:focus-within {
+  border-color: #4f6f99;
+}
+
+.termpane:focus-within .termpane-header {
+  background: #1b1d24;
+}
+
 .termpane-header {
   display: flex;
   align-items: center;
