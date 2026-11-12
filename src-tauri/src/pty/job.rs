@@ -142,3 +142,92 @@ mod imp {
 }
 
 pub use imp::Job;
+
+/// Orphan checks for PLAN.md phase 5: closing a job, or the app dying while it
+/// holds one, must take the whole tree with it.
+#[cfg(all(test, windows))]
+mod tests {
+    use super::Job;
+    use std::io::{BufRead, BufReader};
+    use std::os::windows::io::AsRawHandle;
+    use std::process::{Child, Command, Stdio};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+
+    const CHILD_ENV: &str = "SPECTACLI_JOB_CRASH_CHILD";
+
+    /// A long-running process that ignores stdin.
+    fn sleeper() -> Child {
+        Command::new("ping")
+            .args(["-n", "120", "127.0.0.1"])
+            .stdout(Stdio::null())
+            .spawn()
+            .expect("start ping")
+    }
+
+    /// True if process `pid` exits within `ms`.
+    fn exits_within(pid: u32, ms: u32) -> bool {
+        // SAFETY: plain Win32 calls on a handle we open and close here.
+        unsafe {
+            let h: HANDLE = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
+            if h.is_null() {
+                return true; // already gone
+            }
+            let done = WaitForSingleObject(h, ms) == WAIT_OBJECT_0;
+            CloseHandle(h);
+            done
+        }
+    }
+
+    #[test]
+    fn dropping_job_kills_tree() {
+        let job = Job::new().unwrap();
+        let mut child = sleeper();
+        job.assign(child.as_raw_handle()).unwrap();
+        assert!(job.pids().unwrap().contains(&child.id()));
+        drop(job);
+        assert!(exits_within(child.id(), 5000), "child outlived its job");
+        let _ = child.wait();
+    }
+
+    /// Re-runs this test binary as a stand-in for Spectacli: it puts a
+    /// grandchild in a job, then gets killed like a crash would. Windows
+    /// closes its job handle, which must end the grandchild.
+    #[test]
+    fn crash_of_job_owner_kills_tree() {
+        if std::env::var_os(CHILD_ENV).is_some() {
+            let job = Job::new().unwrap();
+            let grandchild = sleeper();
+            job.assign(grandchild.as_raw_handle()).unwrap();
+            // libtest prints its status on the same line, so the parent
+            // looks for the marker anywhere.
+            println!("GRANDCHILD {}", grandchild.id());
+            std::thread::sleep(std::time::Duration::from_secs(120));
+            unreachable!("the parent kills this process");
+        }
+
+        let mut owner = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "pty::job::tests::crash_of_job_owner_kills_tree", "--nocapture", "--test-threads=1"])
+            .env(CHILD_ENV, "1")
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = BufReader::new(owner.stdout.take().unwrap())
+            .lines()
+            .map_while(Result::ok)
+            .find_map(|l| l.split_once("GRANDCHILD ").and_then(|(_, p)| p.trim().parse::<u32>().ok()))
+            .expect("child reports its grandchild");
+        // Hold a handle so the PID cannot be reused before we check it.
+        // SAFETY: plain Win32 calls; closed below.
+        let h = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        assert!(!h.is_null(), "grandchild should be running");
+
+        owner.kill().unwrap(); // TerminateProcess: no destructors run
+        owner.wait().unwrap();
+
+        // SAFETY: valid handle from above.
+        let gone = unsafe { WaitForSingleObject(h, 5000) } == WAIT_OBJECT_0;
+        unsafe { CloseHandle(h) };
+        assert!(gone, "grandchild {pid} was orphaned after its job owner died");
+    }
+}
