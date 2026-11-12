@@ -2,7 +2,20 @@
 
 A lightweight desktop app that runs all your installed AI coding CLIs side by side in one window, with per-agent RAM and status.
 
-> Early development. Not usable yet. See [PLAN.md](PLAN.md).
+Windows 10 and 11. Version 0.1, so expect rough edges and please [report issues](https://github.com/inferism/Spectacli/issues).
+
+## Features
+
+- **Side by side:** run several CLIs in one window, in a grid or one at a time in Focus mode. Ctrl+1–9 jumps to a pane, Ctrl+Shift+Enter maximizes it.
+- **Status at a glance:** each agent shows whether it is working, idle, waiting for your input, or exited. The bell lists agents that need you, and Windows notifies you when the app is in the background.
+- **RAM and CPU per agent:** see what each CLI costs, and what SpectaCLI itself uses.
+- **Sleep:** stop an idle agent to free its memory and pick its conversation up again later, by hand or automatically after a set time.
+- **Projects and conversations:** keep agents per folder, and group them into conversations you can switch between. Everything reopens when you start the app again.
+- **Broadcast:** send the same prompt to several agents at once.
+- **Git worktrees:** optionally run an agent in its own worktree and branch, so agents don't edit the same files.
+- **Any command:** besides the detected CLIs, start a WSL shell or any custom command.
+
+Detected automatically when installed: Claude Code, Codex CLI, Gemini CLI, Antigravity, OpenCode, Aider, GitHub Copilot CLI, Qwen Code and Cursor Agent. SpectaCLI does not install them or handle their sign-in; it runs the CLIs you already have.
 
 ## Install
 
