@@ -16,3 +16,20 @@ body {
   color: var(--fg);
   font-family: system-ui, sans-serif;
 }
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.app-body main {
+  flex: 1;
+  min-width: 0;
+}
