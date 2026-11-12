@@ -10,7 +10,8 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
 
 /// Env var carrying a batch shim's command line. portable-pty quotes every
 /// argument MSVC-style, which cmd.exe does not understand, so we run
@@ -46,6 +47,17 @@ struct Agent {
     size: Mutex<(u16, u16)>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
     job: Option<Arc<Job>>,
+    /// Set once the child has exited.
+    exited: (Mutex<bool>, Condvar),
+}
+
+impl Agent {
+    /// True if the child exited within `timeout`.
+    fn wait_exit(&self, timeout: Duration) -> bool {
+        let (m, cv) = &self.exited;
+        let g = cv.wait_timeout_while(lock(m), timeout, |done| !*done).unwrap_or_else(|e| e.into_inner());
+        *g.0
+    }
 }
 
 /// Sees every chunk of an agent's output as it is read: `(agent_id, bytes)`.
@@ -150,6 +162,7 @@ impl PtyManager {
             size: Mutex::new((req.cols, req.rows)),
             killer: Mutex::new(child.clone_killer()),
             job,
+            exited: (Mutex::new(false), Condvar::new()),
         });
         lock(&self.agents).insert(id.clone(), agent.clone());
 
@@ -198,6 +211,8 @@ impl PtyManager {
             .name(format!("pty-wait-{id}"))
             .spawn(move || {
                 let code = child.wait().ok().map(|s| s.exit_code());
+                *lock(&agent.exited.0) = true;
+                agent.exited.1.notify_all();
                 // The CLI is gone: end whatever it left running, then close
                 // the pseudoconsole so the reader drains and hits EOF.
                 if let Some(job) = &agent.job {
@@ -253,6 +268,28 @@ impl PtyManager {
             let _ = lock(&agent.killer).kill();
         }
         Ok(())
+    }
+
+    /// Ask the CLI to quit by typing `keys` one at a time (`gap` apart), give
+    /// it `grace` to exit, then end the whole tree either way. Blocks; the
+    /// exit hook fires as for `kill`.
+    pub fn stop_gracefully(&self, id: &str, keys: &[String], gap: Duration, grace: Duration) -> Result<(), String> {
+        let agent = self.get(id)?;
+        let mut exited = false;
+        for k in keys {
+            if self.write(id, k.as_bytes()).is_err() {
+                break;
+            }
+            if agent.wait_exit(gap) {
+                exited = true;
+                break;
+            }
+        }
+        if !exited && !keys.is_empty() {
+            agent.wait_exit(grace);
+        }
+        // Also ends what the CLI left running (MCP servers and the like).
+        self.kill(id)
     }
 
     /// Job Objects of the live agents, for the stats sampler. Holding one
@@ -367,6 +404,33 @@ mod tests {
             unsafe { CloseHandle(h) };
         }
         rx.recv_timeout(Duration::from_secs(10)).expect("exit hook fires after kill");
+        assert!(m.ids().is_empty());
+    }
+
+    const GAP: Duration = Duration::from_millis(300);
+
+    #[test]
+    fn stop_gracefully_lets_the_cli_quit_itself() {
+        let (m, rx) = manager();
+        // An interactive cmd prompt that quits when it reads `exit 5`.
+        let id = m.spawn(req(LaunchKind::Exe, "cmd.exe", &["/d", "/q"], &[])).unwrap();
+        let started = Instant::now();
+        m.stop_gracefully(&id, &["exit 5\r".into()], GAP, Duration::from_secs(5)).unwrap();
+        let (got, code) = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!((got.as_str(), code), (id.as_str(), Some(5)), "cmd ran `exit 5` rather than being killed");
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert!(m.ids().is_empty());
+    }
+
+    #[test]
+    fn stop_gracefully_kills_a_cli_that_ignores_the_keys() {
+        let (m, rx) = manager();
+        let id = m.spawn(req(LaunchKind::Exe, "cmd.exe", &["/d", "/c"], &["ping", "-n", "60", "127.0.0.1"])).unwrap();
+        let started = Instant::now();
+        m.stop_gracefully(&id, &["x".into()], GAP, Duration::from_millis(500)).unwrap();
+        let (_, code) = rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        assert_eq!(code, Some(1), "ended by the job");
+        assert!(started.elapsed() < Duration::from_secs(5));
         assert!(m.ids().is_empty());
     }
 }

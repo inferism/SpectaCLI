@@ -43,6 +43,10 @@ pub struct AgentDef {
     pub image_paste: Option<ImagePaste>,
     #[serde(default = "default_submit")]
     pub submit: String,
+    /// Keys that ask the CLI to quit cleanly, sent one at a time before a
+    /// hibernate. Empty: the process tree is ended directly.
+    #[serde(default)]
+    pub exit_keys: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

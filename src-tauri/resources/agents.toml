@@ -15,6 +15,7 @@
 #   config_dir_env     env var that points the CLI at a profile directory
 #   image_paste        "path" or "native"
 #   submit             bytes sent to submit a prompt (default "\r")
+#   exit_keys          keys sent one by one to quit cleanly before a hibernate
 
 [[agent]]
 id = "claude"
@@ -29,6 +30,8 @@ hook = { kind = "claude-settings" }
 config_dir_env = "CLAUDE_CONFIG_DIR"
 image_paste = "path"
 submit = "\r"
+# Ctrl+C clears the prompt or asks to confirm; the second one quits.
+exit_keys = ["\u0003", "\u0003"]
 
 [[agent]]
 id = "codex"
@@ -39,6 +42,7 @@ version_regex = '(?i)codex'
 resume_args = ["resume", "--last"]
 hook = { kind = "codex-notify" }
 config_dir_env = "CODEX_HOME"
+exit_keys = ["\u0003", "\u0003"]
 
 [[agent]]
 id = "gemini"

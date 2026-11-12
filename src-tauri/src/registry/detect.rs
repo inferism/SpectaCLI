@@ -422,6 +422,7 @@ mod tests {
             config_dir_env: None,
             image_paste: None,
             submit: "\r".into(),
+            exit_keys: vec![],
         }
     }
 
