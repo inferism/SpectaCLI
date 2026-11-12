@@ -103,3 +103,10 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+.sb-stats {
+  flex: none;
+  opacity: 0.55;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

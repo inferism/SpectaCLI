@@ -1,12 +1,15 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { type DetectedAgent, detectAgents, onRegistryChanged } from "../../lib/ipc";
+import { fmtBytes } from "../../lib/format";
+import { useStats } from "../../store/stats";
 import { activeConversation, type LaunchWhat, useWorkspace } from "../../store/workspace";
 import "./Sidebar.css";
 
 export default function Sidebar() {
   const { projects, activeProjectId, runtime, addProject, selectProject, removeProject, launch, closeAgent } =
     useWorkspace();
+  const tick = useStats((s) => s.tick);
   const [detected, setDetected] = useState<DetectedAgent[]>([]);
   const [picker, setPicker] = useState(false);
   const [custom, setCustom] = useState("");
@@ -49,6 +52,13 @@ export default function Sidebar() {
         {projects.map((p) => (
           <li key={p.id} className={p.id === activeProjectId ? "active" : ""} title={p.path}>
             <button className="sb-main" onClick={() => selectProject(p.id)}>{p.name}</button>
+            {(() => {
+              const bytes = activeConversation(p).agents.reduce(
+                (n, a) => n + (tick?.agents[runtime[a.id]?.ptyId ?? ""]?.privateBytes ?? 0),
+                0,
+              );
+              return bytes > 0 && <small className="sb-stats">{fmtBytes(bytes)}</small>;
+            })()}
             <button aria-label={`Remove ${p.name}`} onClick={() => removeProject(p.id)}>×</button>
           </li>
         ))}
@@ -87,6 +97,10 @@ export default function Sidebar() {
         {mine.map((a) => (
           <li key={a.id} className={runtime[a.id]?.ptyId && !runtime[a.id].exited ? "" : "exited"}>
             <span className="sb-main">{a.name}</span>
+            {(() => {
+              const u = runtime[a.id]?.ptyId ? tick?.agents[runtime[a.id].ptyId!] : undefined;
+              return u && <small className="sb-stats" title={`${u.processes} processes`}>{fmtBytes(u.privateBytes)}</small>;
+            })()}
             <button aria-label={`Close ${a.name}`} onClick={() => closeAgent(a.id)}>×</button>
           </li>
         ))}

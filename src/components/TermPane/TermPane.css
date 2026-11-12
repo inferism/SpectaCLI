@@ -50,3 +50,10 @@
   padding: 4px;
   background: #0f1115;
 }
+
+.termpane-stats {
+  flex: none;
+  opacity: 0.6;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}

@@ -1,5 +1,7 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect, useState } from "react";
+import { fmtBytes, fmtCpu } from "../../lib/format";
+import { useStats } from "../../store/stats";
 import "./TitleBar.css";
 
 export default function TitleBar() {
@@ -13,6 +15,11 @@ export default function TitleBar() {
     return () => void unlisten.then((f) => f());
   }, []);
 
+  const tick = useStats((s) => s.tick);
+  const agents = tick ? Object.values(tick.agents) : [];
+  const agentBytes = agents.reduce((n, u) => n + u.privateBytes, 0);
+  const agentCpu = agents.reduce((n, u) => n + u.cpu, 0);
+
   const win = getCurrentWindow();
 
   return (
@@ -20,6 +27,15 @@ export default function TitleBar() {
       <span className="titlebar-title" data-tauri-drag-region>
         SpectaCLI
       </span>
+      {tick && (
+        <span
+          className="titlebar-stats"
+          data-tauri-drag-region
+          title="Private bytes. Agents are the CLI process trees; Spectacli is the app, its WebView2 and the ConPTY hosts."
+        >
+          Agents {fmtBytes(agentBytes)} · {fmtCpu(agentCpu)} · Spectacli {fmtBytes(tick.spectacli.privateBytes)}
+        </span>
+      )}
       <div className="titlebar-buttons">
         <button aria-label="Minimize" onClick={() => void win.minimize()}>
           <svg width="10" height="10" viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" /></svg>

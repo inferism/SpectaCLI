@@ -4,6 +4,8 @@ import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
 import { attachAgent, detachAgent, newAttachId, resizeAgent, writeAgent } from "../../lib/ipc";
+import { fmtUsage, usageTitle } from "../../lib/format";
+import { useStats } from "../../store/stats";
 import "./TermPane.css";
 
 interface Props {
@@ -28,6 +30,7 @@ interface Live {
 }
 
 export default function TermPane({ ptyId, visible, name, maximized, onToggleMaximize }: Props) {
+  const usage = useStats((s) => s.tick?.agents[ptyId]);
   const host = useRef<HTMLDivElement>(null);
   const live = useRef<Live | null>(null);
 
@@ -124,6 +127,11 @@ export default function TermPane({ ptyId, visible, name, maximized, onToggleMaxi
       <header className="termpane-header">
         <span className="termpane-dot" title="Status" />
         <span className="termpane-name">{name}</span>
+        {usage && (
+          <span className="termpane-stats" title={usageTitle(usage)}>
+            {fmtUsage(usage)}
+          </span>
+        )}
         <button aria-label={maximized ? "Restore pane" : "Maximize pane"} onClick={onToggleMaximize}>
           {maximized ? "❐" : "▢"}
         </button>

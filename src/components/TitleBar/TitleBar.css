@@ -36,3 +36,11 @@
 .titlebar-buttons button.close:hover {
   background: #c42b1c;
 }
+
+.titlebar-stats {
+  flex: 1;
+  text-align: center;
+  font-size: 11px;
+  opacity: 0.65;
+  font-variant-numeric: tabular-nums;
+}
