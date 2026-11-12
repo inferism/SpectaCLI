@@ -2,7 +2,7 @@ mod pty;
 mod registry;
 
 use pty::{PtyManager, SpawnRequest};
-use registry::DetectedAgent;
+use registry::{DetectedAgent, LaunchKind, LaunchSpec};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -43,6 +43,31 @@ async fn spawn_agent(
         let launch = cached
             .or_else(|| find(&detect_and_store(&app)))
             .ok_or_else(|| format!("agent `{agent_def_id}` is not installed"))?;
+        app.state::<PtyManager>().spawn(SpawnRequest { launch, args: vec![], cwd, env: vec![], cols, rows })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Start a user-typed command line in `cwd` through the shell.
+#[tauri::command]
+async fn spawn_custom(
+    app: AppHandle,
+    command: String,
+    cwd: PathBuf,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    if command.trim().is_empty() {
+        return Err("empty command".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        // With /s, cmd strips the outer quotes the pty layer adds around the line.
+        let launch = LaunchSpec {
+            kind: LaunchKind::Exe,
+            program: PathBuf::from(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())),
+            args: vec!["/d".into(), "/s".into(), "/c".into(), command],
+        };
         app.state::<PtyManager>().spawn(SpawnRequest { launch, args: vec![], cwd, env: vec![], cols, rows })
     })
     .await
@@ -92,6 +117,7 @@ struct AgentExit {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(Detected::default())
         .setup(|app| {
             let handle = app.handle().clone();
@@ -110,6 +136,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             detect_agents,
             spawn_agent,
+            spawn_custom,
             attach_agent,
             detach_agent,
             write,

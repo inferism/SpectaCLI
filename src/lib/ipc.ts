@@ -66,6 +66,9 @@ export const detachAgent = (agentId: string) => invoke<void>("detach_agent", { a
 export const writeAgent = (agentId: string, data: string) => invoke<void>("write", { agentId, data });
 export const resizeAgent = (agentId: string, cols: number, rows: number) =>
   invoke<void>("resize", { agentId, cols, rows });
+/** Start a free-form command line (run through cmd.exe) in `cwd`. */
+export const spawnCustom = (command: string, cwd: string, cols: number, rows: number) =>
+  invoke<string>("spawn_custom", { command, cwd, cols, rows });
 /** Kills the agent's whole process tree. `agent:exit` still fires. */
 export const killAgent = (agentId: string) => invoke<void>("kill_agent", { agentId });
 

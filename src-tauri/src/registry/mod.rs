@@ -8,7 +8,7 @@ pub mod shim;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-pub use detect::DetectedAgent;
+pub use detect::{DetectedAgent, LaunchKind, LaunchSpec};
 
 const BUILTIN: &str = include_str!("../../resources/agents.toml");
 pub const USER_FILE: &str = "agents.user.toml";
