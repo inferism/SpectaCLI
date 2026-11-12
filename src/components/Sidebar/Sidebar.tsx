@@ -7,8 +7,18 @@ import { activeConversation, type LaunchWhat, useWorkspace } from "../../store/w
 import "./Sidebar.css";
 
 export default function Sidebar() {
-  const { projects, activeProjectId, runtime, addProject, selectProject, removeProject, launch, closeAgent } =
-    useWorkspace();
+  const {
+    projects,
+    activeProjectId,
+    runtime,
+    addProject,
+    selectProject,
+    removeProject,
+    launch,
+    closeAgent,
+    newConversation,
+    selectConversation,
+  } = useWorkspace();
   const tick = useStats((s) => s.tick);
   const [detected, setDetected] = useState<DetectedAgent[]>([]);
   const [picker, setPicker] = useState(false);
@@ -60,6 +70,21 @@ export default function Sidebar() {
               return bytes > 0 && <small className="sb-stats">{fmtBytes(bytes)}</small>;
             })()}
             <button aria-label={`Remove ${p.name}`} onClick={() => removeProject(p.id)}>×</button>
+          </li>
+        ))}
+      </ul>
+
+      <div className="sb-head">
+        <span>Conversations</span>
+        <button disabled={!activeProjectId} onClick={() => activeProjectId && newConversation(activeProjectId)}>
+          New
+        </button>
+      </div>
+      <ul className="sb-list">
+        {active?.conversations.map((c) => (
+          <li key={c.id} className={c.id === activeConversation(active).id ? "active" : ""}>
+            <button className="sb-main" onClick={() => selectConversation(active.id, c.id)}>{c.title}</button>
+            <small className="sb-stats">{c.agents.length}</small>
           </li>
         ))}
       </ul>

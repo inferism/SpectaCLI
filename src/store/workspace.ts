@@ -28,7 +28,7 @@ export interface Layout {
   maximizedAgentId: string | null;
 }
 
-/** Phase 3 adds more; until then every project has exactly one. */
+/** A named set of agents with its own layout; a project has one or more. */
 export interface Conversation {
   id: string;
   title: string;
@@ -86,6 +86,10 @@ interface WorkspaceState {
   /** Start an agent in `projectId`. Resolves to the new instance id, or null if the project went away meanwhile. */
   launch: (projectId: string, what: LaunchWhat) => Promise<string | null>;
   closeAgent: (instanceId: string) => void;
+  /** "New": add an empty conversation to the project and switch to it. Returns its id. */
+  newConversation: (projectId: string) => string | null;
+  /** Show another conversation of the project; the one left keeps running in the background. */
+  selectConversation: (projectId: string, conversationId: string) => void;
   /** Resume the saved, non-hibernated agents of a project that have no process yet (once per app session each). */
   restoreProject: (projectId: string) => Promise<void>;
   /** From `agent:exit`, which reports the PTY id. */
@@ -126,8 +130,8 @@ export function soloAgentId(c: Conversation): string | null {
   return has(c.layout.maximizedAgentId) ? c.layout.maximizedAgentId : null;
 }
 
-function newConversation(): Conversation {
-  return { id: crypto.randomUUID(), title: "Default", createdAt: now(), agents: [], layout: { mode: "grid", focusedAgentId: null, maximizedAgentId: null } };
+function newConversation(title = "Default"): Conversation {
+  return { id: crypto.randomUUID(), title, createdAt: now(), agents: [], layout: { mode: "grid", focusedAgentId: null, maximizedAgentId: null } };
 }
 
 /** Repair what a hand-edited or partial file might lack. */
@@ -361,6 +365,31 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       );
     },
 
+    newConversation: (projectId) => {
+      const project = get().projects.find((p) => p.id === projectId);
+      if (!project) return null;
+      // Next free "Conversation N", so a deleted or renamed title never collides.
+      const titles = new Set(project.conversations.map((c) => c.title));
+      let n = project.conversations.length + 1;
+      while (titles.has(`Conversation ${n}`)) n++;
+      const conv = newConversation(`Conversation ${n}`);
+      set((s) => ({
+        projects: s.projects.map((p) =>
+          p.id === projectId ? { ...p, conversations: [...p.conversations, conv], activeConversationId: conv.id } : p,
+        ),
+      }));
+      return conv.id;
+    },
+
+    selectConversation: (projectId, conversationId) => {
+      const project = get().projects.find((p) => p.id === projectId);
+      if (!project || !project.conversations.some((c) => c.id === conversationId)) return;
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === projectId ? { ...p, activeConversationId: conversationId } : p)),
+      }));
+      void get().restoreProject(projectId);
+    },
+
     closeAgent: (instanceId) => {
       const pty = get().runtime[instanceId]?.ptyId;
       if (pty) void killAgent(pty).catch(() => {});
@@ -459,14 +488,28 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
     revealAgent: (projectId, instanceId) =>
       set((s) => ({
-        projects: updateConversation(s.projects, projectId, (c) => ({
-          ...c,
-          layout: {
-            ...c.layout,
-            focusedAgentId: instanceId,
-            maximizedAgentId: c.layout.maximizedAgentId ? instanceId : null,
-          },
-        })),
+        projects: s.projects.map((p) => {
+          if (p.id !== projectId) return p;
+          // The agent may live in a conversation that is not showing: switch to it.
+          const owner = p.conversations.find((c) => c.agents.some((a) => a.id === instanceId));
+          const activeConversationId = owner?.id ?? p.activeConversationId;
+          return {
+            ...p,
+            activeConversationId,
+            conversations: p.conversations.map((c) =>
+              c.id !== activeConversationId
+                ? c
+                : {
+                    ...c,
+                    layout: {
+                      ...c.layout,
+                      focusedAgentId: instanceId,
+                      maximizedAgentId: c.layout.maximizedAgentId ? instanceId : null,
+                    },
+                  },
+            ),
+          };
+        }),
       })),
   };
 });

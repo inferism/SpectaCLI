@@ -23,7 +23,9 @@ function paneShown(projectId: string, instanceId: string): boolean {
   const { projects, activeProjectId } = useWorkspace.getState();
   const project = projects.find((p) => p.id === projectId);
   if (!project || projectId !== activeProjectId) return false;
-  const solo = soloAgentId(activeConversation(project));
+  const conv = activeConversation(project);
+  if (!conv.agents.some((a) => a.id === instanceId)) return false;
+  const solo = soloAgentId(conv);
   return solo === null || solo === instanceId;
 }
 

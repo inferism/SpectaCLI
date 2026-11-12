@@ -1,12 +1,12 @@
-import { activeConversation, type Project, soloAgentId, useWorkspace } from "../../store/workspace";
+import { activeConversation, type Conversation, type Project, soloAgentId, useWorkspace } from "../../store/workspace";
 import TermPane from "../TermPane/TermPane";
 import { useWindowShown } from "../../lib/windowShown";
 import { gridDims } from "./gridDims";
 import "./PaneGrid.css";
 
 /**
- * One grid per project with running agents, all mounted: switching projects
- * hides a grid instead of unmounting it. Hidden panes drop their terminals
+ * One grid per conversation with running agents, all mounted: switching
+ * projects or conversations hides a grid instead of unmounting it. Hidden panes drop their terminals
  * (see TermPane) and replay the agent's scrollback when shown again.
  */
 export default function PaneGrid() {
@@ -16,13 +16,19 @@ export default function PaneGrid() {
   const windowShown = useWindowShown();
 
   const active = projects.find((p) => p.id === activeProjectId);
-  const hasRunning = (p: Project) => activeConversation(p).agents.some((a) => runtime[a.id]?.ptyId);
-  const mounted = projects.filter((p) => p.id === activeProjectId || hasRunning(p));
+  const hasRunning = (c: Conversation) => c.agents.some((a) => runtime[a.id]?.ptyId);
+  // Every conversation that is showing or has a live agent stays mounted.
+  const mounted = projects.flatMap((p) => {
+    const current = activeConversation(p);
+    return p.conversations
+      .filter((c) => (p.id === activeProjectId && c.id === current.id) || hasRunning(c))
+      .map((c) => ({ project: p, conv: c, visible: p.id === activeProjectId && c.id === current.id }));
+  });
 
   return (
     <>
-      {mounted.map((p) => (
-        <ProjectGrid key={p.id} project={p} visible={p.id === activeProjectId} windowShown={windowShown} />
+      {mounted.map(({ project, conv, visible }) => (
+        <ProjectGrid key={conv.id} project={project} conv={conv} visible={visible} windowShown={windowShown} />
       ))}
       {(!active || activeConversation(active).agents.length === 0) && (
         <div className="grid-empty">{active ? "Add an agent with + in the sidebar." : "Add a project folder to start."}</div>
@@ -31,7 +37,17 @@ export default function PaneGrid() {
   );
 }
 
-function ProjectGrid({ project, visible, windowShown }: { project: Project; visible: boolean; windowShown: boolean }) {
+function ProjectGrid({
+  project,
+  conv,
+  visible,
+  windowShown,
+}: {
+  project: Project;
+  conv: Conversation;
+  visible: boolean;
+  windowShown: boolean;
+}) {
   const runtime = useWorkspace((s) => s.runtime);
   const toggleMaximize = useWorkspace((s) => s.toggleMaximize);
   const setLayoutMode = useWorkspace((s) => s.setLayoutMode);
@@ -39,7 +55,6 @@ function ProjectGrid({ project, visible, windowShown }: { project: Project; visi
   const hibernate = useWorkspace((s) => s.hibernate);
   const resume = useWorkspace((s) => s.resume);
   const setAutoHibernate = useWorkspace((s) => s.setAutoHibernate);
-  const conv = activeConversation(project);
   const agents = conv.agents;
   if (agents.length === 0) return null;
 

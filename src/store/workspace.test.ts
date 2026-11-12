@@ -267,3 +267,36 @@ test("auto-hibernate minutes are saved and cleared", async () => {
   ws().setAutoHibernate(id, null);
   expect("autoHibernateMin" in agentsOf(ws().activeProjectId!)[0]).toBe(false);
 });
+
+test("New adds an empty conversation and switches to it; the old one keeps its agents", async () => {
+  ws().addProject("C:\a");
+  const p = ws().activeProjectId!;
+  const first = (await ws().launch(p, { command: "x" }))!;
+  const firstConv = ws().projects[0].activeConversationId;
+  const id = ws().newConversation(p)!;
+  const project = ws().projects[0];
+  expect(project.conversations.map((c) => c.title)).toEqual(["Default", "Conversation 2"]);
+  expect(project.activeConversationId).toBe(id);
+  expect(activeConversation(project).agents).toEqual([]);
+  // New agents go to the new conversation; nothing is killed.
+  const second = (await ws().launch(p, { command: "y" }))!;
+  expect(agentsOf(p).map((a) => a.id)).toEqual([second]);
+  expect(killed).toEqual([]);
+  ws().selectConversation(p, firstConv);
+  expect(agentsOf(p).map((a) => a.id)).toEqual([first]);
+  expect(ws().runtime[second]?.ptyId).toBeTruthy();
+});
+
+test("selectConversation ignores an unknown id, and revealAgent switches to the agent's conversation", async () => {
+  ws().addProject("C:\a");
+  const p = ws().activeProjectId!;
+  const first = (await ws().launch(p, { command: "x" }))!;
+  const firstConv = ws().projects[0].activeConversationId;
+  ws().newConversation(p);
+  const current = ws().projects[0].activeConversationId;
+  ws().selectConversation(p, "nope");
+  expect(ws().projects[0].activeConversationId).toBe(current);
+  ws().revealAgent(p, first);
+  expect(ws().projects[0].activeConversationId).toBe(firstConv);
+  expect(activeConversation(ws().projects[0]).layout.focusedAgentId).toBe(first);
+});
