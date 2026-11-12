@@ -1,16 +1,19 @@
 import { activeConversation, type Project, useWorkspace } from "../../store/workspace";
 import TermPane from "../TermPane/TermPane";
+import { useWindowShown } from "../../lib/windowShown";
 import { gridDims } from "./gridDims";
 import "./PaneGrid.css";
 
 /**
- * One grid per project, all mounted: switching projects hides a grid instead
- * of unmounting it, so terminals keep their screen and scrollback.
+ * One grid per project with running agents, all mounted: switching projects
+ * hides a grid instead of unmounting it. Hidden panes drop their terminals
+ * (see TermPane) and replay the agent's scrollback when shown again.
  */
 export default function PaneGrid() {
   const projects = useWorkspace((s) => s.projects);
   const activeProjectId = useWorkspace((s) => s.activeProjectId);
   const runtime = useWorkspace((s) => s.runtime);
+  const windowShown = useWindowShown();
 
   const active = projects.find((p) => p.id === activeProjectId);
   const hasRunning = (p: Project) => activeConversation(p).agents.some((a) => runtime[a.id]?.ptyId);
@@ -19,7 +22,7 @@ export default function PaneGrid() {
   return (
     <>
       {mounted.map((p) => (
-        <ProjectGrid key={p.id} project={p} visible={p.id === activeProjectId} />
+        <ProjectGrid key={p.id} project={p} visible={p.id === activeProjectId} windowShown={windowShown} />
       ))}
       {(!active || activeConversation(active).agents.length === 0) && (
         <div className="grid-empty">{active ? "Add an agent with + in the sidebar." : "Add a project folder to start."}</div>
@@ -28,7 +31,7 @@ export default function PaneGrid() {
   );
 }
 
-function ProjectGrid({ project, visible }: { project: Project; visible: boolean }) {
+function ProjectGrid({ project, visible, windowShown }: { project: Project; visible: boolean; windowShown: boolean }) {
   const runtime = useWorkspace((s) => s.runtime);
   const toggleMaximize = useWorkspace((s) => s.toggleMaximize);
   const conv = activeConversation(project);
@@ -59,7 +62,7 @@ function ProjectGrid({ project, visible }: { project: Project; visible: boolean 
             {rt?.ptyId ? (
               <TermPane
                 ptyId={rt.ptyId}
-                visible={visible && shown}
+                visible={visible && shown && windowShown}
                 name={name}
                 maximized={maximized === a.id}
                 onToggleMaximize={() => toggleMaximize(project.id, a.id)}
