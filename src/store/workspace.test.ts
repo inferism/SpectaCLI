@@ -293,6 +293,16 @@ test("an agent can be renamed; blank names are ignored", async () => {
   expect(agentsOf(ws().activeProjectId!)[0].name).toBe("Reviewer");
 });
 
+test("renameConversation trims and ignores blank titles", () => {
+  ws().addProject("C:\a");
+  const p = ws().activeProjectId!;
+  const c = ws().projects[0].conversations[0].id;
+  ws().renameConversation(p, c, "  Refactor  ");
+  expect(ws().projects[0].conversations[0].title).toBe("Refactor");
+  ws().renameConversation(p, c, "  ");
+  expect(ws().projects[0].conversations[0].title).toBe("Refactor");
+});
+
 test("New adds an empty conversation and switches to it; the old one keeps its agents", async () => {
   ws().addProject("C:\a");
   const p = ws().activeProjectId!;

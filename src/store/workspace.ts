@@ -134,6 +134,7 @@ interface WorkspaceState {
   setAutoHibernate: (instanceId: string, minutes: number | null) => void;
   /** Give an agent a name of the user's choosing. A blank name is ignored. */
   renameAgent: (instanceId: string, name: string) => void;
+  renameConversation: (projectId: string, conversationId: string, title: string) => void;
   toggleMaximize: (projectId: string, instanceId: string) => void;
   setLayoutMode: (projectId: string, mode: Layout["mode"]) => void;
   focusAgent: (projectId: string, instanceId: string) => void;
@@ -542,6 +543,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       const trimmed = name.trim();
       if (!trimmed) return;
       set((s) => ({ projects: updateInstance(s.projects, instanceId, (x) => ({ ...x, name: trimmed })) }));
+    },
+
+    renameConversation: (projectId, conversationId, title) => {
+      const trimmed = title.trim();
+      if (!trimmed) return;
+      set((s) => ({
+        projects: s.projects.map((p) =>
+          p.id !== projectId
+            ? p
+            : { ...p, conversations: p.conversations.map((c) => (c.id === conversationId ? { ...c, title: trimmed } : c)) },
+        ),
+      }));
     },
 
     toggleMaximize: (projectId, instanceId) =>
