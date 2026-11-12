@@ -103,12 +103,19 @@ fn load_with(path: &Path, migrations: &[Migration]) -> Result<Option<Loaded>, St
         }
         Err(Bad::Newer(e)) => Err(e),
         Err(Bad::Corrupt) => {
+            // Settle the recovery before touching anything: if the backup is
+            // from a newer version or fails to migrate, both files stay as
+            // they are and the caller never saves over them.
+            let backup = match fs::read(sibling(path, ".bak")).map(|b| parse(&b, current)) {
+                Ok(Ok((v, n))) => Some(migrate(v, n, migrations)?),
+                Ok(Err(Bad::Newer(e))) => return Err(format!("{} is unreadable and its backup: {e}", file_name(path))),
+                Ok(Err(Bad::Corrupt)) | Err(_) => None,
+            };
             let ts = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
             let aside = sibling(path, &format!(".corrupt-{ts}"));
             fs::rename(path, &aside).map_err(|e| format!("set aside corrupt file: {e}"))?;
-            let backup = fs::read(sibling(path, ".bak")).ok().and_then(|b| parse(&b, current).ok());
             let (data, outcome) = match backup {
-                Some((v, n)) => (migrate(v, n, migrations)?, "the last good copy was restored"),
+                Some(v) => (v, "the last good copy was restored"),
                 None => (serde_json::json!({ "schemaVersion": current }), "no backup was found, so it starts empty"),
             };
             let notice = format!("{} could not be read. It was moved to {} and {outcome}.", file_name(path), file_name(&aside));
@@ -300,5 +307,21 @@ mod tests {
         let l = load_with(&p, &[rename_a_to_b]).unwrap().unwrap();
         assert_eq!(l.data, json!({ "schemaVersion": 2, "b": 1 }));
         assert!(l.notice.is_some());
+    }
+
+    #[test]
+    fn unusable_backup_leaves_both_files_in_place() {
+        // A backup from a newer version, and one whose migration fails.
+        for (bak, migrations) in [
+            (&br#"{ "schemaVersion": 9 }"#[..], &[][..] as &[Migration]),
+            (br#"{ "schemaVersion": 1 }"#, &[fail as Migration][..]),
+        ] {
+            let p = temp_file();
+            fs::write(sibling(&p, ".bak"), bak).unwrap();
+            fs::write(&p, b"garbage").unwrap();
+            assert!(load_with(&p, migrations).is_err());
+            assert_eq!(fs::read(&p).unwrap(), b"garbage");
+            assert_eq!(fs::read(sibling(&p, ".bak")).unwrap(), bak);
+        }
     }
 }
