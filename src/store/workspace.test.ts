@@ -3,6 +3,9 @@ import { beforeEach, expect, test, vi } from "vitest";
 let nextPty = 0;
 let spawnGate: Promise<void> = Promise.resolve();
 const killed: string[] = [];
+const wslSpawns: { distro: string; command: string | null; cwd: string }[] = [];
+const removedTrees: { path: string; force: boolean }[] = [];
+let dirtyFiles = 0;
 const hibernated: string[] = [];
 /** Every spawnAgent call's session options. */
 const spawns: { sessionId?: string | null; resume?: boolean }[] = [];
@@ -18,6 +21,16 @@ vi.mock("../lib/ipc", () => ({
     await spawnGate;
     return `pty-${++nextPty}`;
   },
+  spawnWsl: async (distro: string, command: string | null, cwd: string) => {
+    wslSpawns.push({ distro, command, cwd });
+    return `pty-${++nextPty}`;
+  },
+  createWorktree: async (project: string, name: string) => {
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+    return { path: `${project}\.spectacli\worktrees\${slug}`, branch: `spectacli/${slug}` };
+  },
+  worktreeChanges: async () => dirtyFiles,
+  removeWorktree: async (path: string, force: boolean) => void removedTrees.push({ path, force }),
   killAgent: async (id: string) => void killed.push(id),
   hibernateAgent: async (id: string) => void hibernated.push(id),
 }));
@@ -29,6 +42,9 @@ const agentsOf = (projectId: string) => activeConversation(ws().projects.find((p
 beforeEach(() => {
   useWorkspace.setState({ hydrated: false, fileExtra: {}, projects: [], activeProjectId: null, runtime: {} });
   killed.length = 0;
+  wslSpawns.length = 0;
+  removedTrees.length = 0;
+  dirtyFiles = 0;
   hibernated.length = 0;
   spawns.length = 0;
   spawnGate = Promise.resolve();
@@ -327,3 +343,52 @@ test("revealing an agent in another conversation starts that conversation's save
   expect(ws().projects[0].activeConversationId).toBe("c2");
   expect(spawns).toEqual([{ sessionId: "s-x", resume: true }, { sessionId: "s-y", resume: true }]);
 });
+
+test("an isolated agent starts in its own worktree and records it", async () => {
+  ws().addProject("C:\code\a");
+  const id = (await ws().launch(ws().activeProjectId!, { command: "x" }, { isolate: true }))!;
+  const a = findAgent(id);
+  expect(a.worktree?.branch).toMatch(/^spectacli\/x-/);
+  expect(a.cwd).toBe(a.worktree!.path);
+  expect(a.cwd.startsWith("C:\code\a\.spectacli\worktrees\\")).toBe(true);
+});
+
+test("a launch that fails discards the worktree it made", async () => {
+  ws().addProject("C:\code\a");
+  spawnGate = Promise.reject(new Error("boom"));
+  spawnGate.catch(() => {});
+  await expect(ws().launch(ws().activeProjectId!, { command: "x" }, { isolate: true })).rejects.toThrow("boom");
+  expect(removedTrees).toHaveLength(1);
+  expect(removedTrees[0].force).toBe(true);
+});
+
+test("removing a clean worktree closes the agent and deletes the folder", async () => {
+  ws().addProject("C:\code\a");
+  const id = (await ws().launch(ws().activeProjectId!, { command: "x" }, { isolate: true }))!;
+  const path = findAgent(id).worktree!.path;
+  await ws().removeWorktree(id);
+  expect(killed.length).toBeGreaterThan(0);
+  expect(removedTrees).toEqual([{ path, force: true }]);
+  expect(agentsOf(ws().activeProjectId!)).toHaveLength(0);
+});
+
+test("a dirty worktree is refused until forced, and nothing is closed meanwhile", async () => {
+  ws().addProject("C:\code\a");
+  const id = (await ws().launch(ws().activeProjectId!, { command: "x" }, { isolate: true }))!;
+  dirtyFiles = 2;
+  await expect(ws().removeWorktree(id)).rejects.toMatch(/^dirty: 2 changed files/);
+  expect(killed).toHaveLength(0);
+  expect(removedTrees).toHaveLength(0);
+  await ws().removeWorktree(id, true);
+  expect(removedTrees).toHaveLength(1);
+});
+
+test("a WSL shell launches in the project folder and is saved as a wsl launch", async () => {
+  ws().addProject("C:\code\a");
+  const id = (await ws().launch(ws().activeProjectId!, { wslDistro: "Ubuntu" }))!;
+  expect(wslSpawns).toEqual([{ distro: "Ubuntu", command: null, cwd: "C:\code\a" }]);
+  expect(findAgent(id).launch).toEqual({ kind: "wsl", distro: "Ubuntu" });
+  expect(findAgent(id).name).toBe("WSL · Ubuntu");
+});
+
+const findAgent = (id: string) => agentsOf(ws().activeProjectId!).find((a) => a.id === id)!;

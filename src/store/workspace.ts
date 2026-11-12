@@ -1,11 +1,31 @@
 import { create } from "zustand";
-import { hibernateAgent, killAgent, type SessionOpts, spawnAgent, spawnCustom } from "../lib/ipc";
+import {
+  createWorktree,
+  hibernateAgent,
+  killAgent,
+  removeWorktree as removeWorktreeIpc,
+  type SessionOpts,
+  spawnAgent,
+  spawnCustom,
+  spawnWsl,
+  worktreeChanges,
+} from "../lib/ipc";
 
 // --- Persisted shape (projects.json, PLAN.md section 4) ---
 // Objects are only ever updated by spreading, so fields written by a newer
 // version of the app survive a load/save round trip.
 
-export type AgentLaunch = { kind: "def"; agentDefId: string } | { kind: "custom"; command: string };
+export type AgentLaunch =
+  | { kind: "def"; agentDefId: string }
+  | { kind: "custom"; command: string }
+  /** A login shell (or `command`) inside a WSL distro. */
+  | { kind: "wsl"; distro: string; command?: string };
+
+/** The agent's own git worktree; its `cwd` is `path`. */
+export interface AgentWorktree {
+  path: string;
+  branch: string;
+}
 
 export interface AgentInstance {
   /** Stable across restarts. Not the PTY id, which changes every launch. */
@@ -13,6 +33,8 @@ export interface AgentInstance {
   launch: AgentLaunch;
   name: string;
   cwd: string;
+  /** Set when the agent was started isolated in its own worktree. */
+  worktree?: AgentWorktree;
   /** The CLI's own session id, for CLIs that take one up front (Claude). */
   sessionId?: string;
   /** Stopped to free its memory; resumes its session when clicked. */
@@ -68,7 +90,12 @@ export interface AgentRuntime {
   note?: string;
 }
 
-export type LaunchWhat = { defId: string; name: string } | { command: string };
+export type LaunchWhat = { defId: string; name: string } | { command: string } | { wslDistro: string; command?: string };
+
+export interface LaunchOpts {
+  /** Run in a new git worktree of the project instead of the project folder. */
+  isolate?: boolean;
+}
 
 interface WorkspaceState {
   /** False until `hydrate` ran; nothing may be saved before that. */
@@ -84,7 +111,13 @@ interface WorkspaceState {
   selectProject: (id: string) => void;
   removeProject: (id: string) => void;
   /** Start an agent in `projectId`. Resolves to the new instance id, or null if the project went away meanwhile. */
-  launch: (projectId: string, what: LaunchWhat) => Promise<string | null>;
+  launch: (projectId: string, what: LaunchWhat, opts?: LaunchOpts) => Promise<string | null>;
+  /**
+   * Close the agent and delete its worktree folder (the branch stays). Rejects
+   * with "dirty: ..." when the worktree has changes and `force` is not set,
+   * before anything is closed.
+   */
+  removeWorktree: (instanceId: string, force?: boolean) => Promise<void>;
   closeAgent: (instanceId: string) => void;
   /** "New": add an empty conversation to the project and switch to it. Returns its id. */
   newConversation: (projectId: string) => string | null;
@@ -198,6 +231,10 @@ interface Started {
 async function spawnFor(launch: AgentLaunch, cwd: string, session: SessionOpts): Promise<Started> {
   if (launch.kind === "custom") {
     const ptyId = await spawnCustom(launch.command, cwd, 80, 24);
+    return { ptyId, sessionId: null, resumed: false, resumable: false };
+  }
+  if (launch.kind === "wsl") {
+    const ptyId = await spawnWsl(launch.distro, launch.command ?? null, cwd, 80, 24);
     return { ptyId, sessionId: null, resumed: false, resumable: false };
   }
   const s = await spawnAgent(launch.agentDefId, cwd, 80, 24, session);
@@ -318,15 +355,32 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       });
     },
 
-    launch: async (projectId, what) => {
+    launch: async (projectId, what, opts = {}) => {
       const project = get().projects.find((p) => p.id === projectId);
       if (!project) return null;
       const launch: AgentLaunch =
-        "defId" in what ? { kind: "def", agentDefId: what.defId } : { kind: "custom", command: what.command };
+        "defId" in what
+          ? { kind: "def", agentDefId: what.defId }
+          : "wslDistro" in what
+            ? { kind: "wsl", distro: what.wslDistro, ...(what.command ? { command: what.command } : {}) }
+            : { kind: "custom", command: what.command };
+      const name = "defId" in what ? what.name : "wslDistro" in what ? `WSL · ${what.wslDistro}` : what.command;
+      // The worktree is made first: the agent starts inside it.
+      let worktree: AgentWorktree | undefined;
+      if (opts.isolate) {
+        worktree = await createWorktree(project.path, `${name}-${crypto.randomUUID().slice(0, 4)}`);
+      }
+      const cwd = worktree?.path ?? project.path;
+      const discardWorktree = () => {
+        if (worktree) void removeWorktreeIpc(worktree.path, true).catch(() => {});
+      };
       let r: Started;
       launching++;
       try {
-        r = await spawnFor(launch, project.path, {});
+        r = await spawnFor(launch, cwd, {});
+      } catch (e) {
+        discardWorktree();
+        throw e;
       } finally {
         launching--;
       }
@@ -334,13 +388,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       if (!get().projects.some((p) => p.id === projectId)) {
         earlyExits.delete(r.ptyId);
         void killAgent(r.ptyId).catch(() => {});
+        discardWorktree();
         return null;
       }
       const instance: AgentInstance = {
         id: crypto.randomUUID(),
         launch,
-        name: "defId" in what ? what.name : what.command,
-        cwd: project.path,
+        name,
+        cwd,
+        ...(worktree ? { worktree } : {}),
         ...(r.sessionId ? { sessionId: r.sessionId } : {}),
       };
       const exited = earlyExits.delete(r.ptyId);
@@ -349,6 +405,21 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         runtime: { ...s.runtime, [instance.id]: { ptyId: r.ptyId, exited, resumable: r.resumable, resumedAt: null } },
       }));
       return instance.id;
+    },
+
+    removeWorktree: async (instanceId, force = false) => {
+      const a = findInstance(get().projects, instanceId);
+      if (!a?.worktree) return;
+      const { path } = a.worktree;
+      if (!force) {
+        const n = await worktreeChanges(path);
+        if (n > 0) throw `dirty: ${n} changed file${n === 1 ? "" : "s"}`;
+      }
+      // The process holds the folder open on Windows: end it first.
+      const pty = get().runtime[instanceId]?.ptyId;
+      if (pty) await killAgent(pty).catch(() => {});
+      get().closeAgent(instanceId);
+      await removeWorktreeIpc(path, true);
     },
 
     restoreProject: async (projectId) => {

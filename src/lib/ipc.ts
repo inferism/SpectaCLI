@@ -107,6 +107,27 @@ export const resizeAgent = (agentId: string, cols: number, rows: number) =>
 /** Start a free-form command line (run through cmd.exe) in `cwd`. */
 export const spawnCustom = (command: string, cwd: string, cols: number, rows: number) =>
   invoke<string>("spawn_custom", { command, cwd, cols, rows });
+/** Start a login shell in a WSL distro (or run `command` in one), in `cwd` (a Windows path, converted). */
+export const spawnWsl = (distro: string, command: string | null, cwd: string, cols: number, rows: number) =>
+  invoke<string>("spawn_wsl", { distro, command, cwd, cols, rows });
+/** Installed WSL distributions; empty when WSL is missing. */
+export const listWslDistros = () => invoke<string[]>("list_wsl_distros");
+
+// --- Worktrees (src-tauri/src/worktree.rs) ---
+
+export interface Worktree {
+  path: string;
+  branch: string;
+}
+
+/** `git worktree add` under `<project>/.spectacli/worktrees`, on a new `spectacli/<name>` branch. */
+export const createWorktree = (project: string, name: string) => invoke<Worktree>("create_worktree", { project, name });
+/** Changed files in a worktree; 0 means it is safe to remove. */
+export const worktreeChanges = (path: string) => invoke<number>("worktree_changes", { path });
+/** Removes the folder, keeps the branch. Without `force`, rejects with "dirty: ..." if it has changes. */
+export const removeWorktree = (path: string, force: boolean) => invoke<void>("remove_worktree", { path, force });
+export const openFolder = (path: string) => invoke<void>("open_folder", { path });
+
 /** Kills the agent's whole process tree. `agent:exit` still fires. */
 export const killAgent = (agentId: string) => invoke<void>("kill_agent", { agentId });
 
