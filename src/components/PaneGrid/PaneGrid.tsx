@@ -101,6 +101,8 @@ function ProjectGrid({
         ...(maximized
           ? { gridTemplateColumns: "1fr", gridAutoRows: "100%" }
           : { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: rowSize }),
+        // Only a grid with more than 3 rows has anything to scroll to.
+        overflowY: !maximized && rows > 3 ? "auto" : "hidden",
       }}
     >
       {agents.map((a, i) => {
