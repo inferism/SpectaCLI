@@ -29,6 +29,7 @@ export default function Sidebar() {
   const [isolate, setIsolate] = useState(false);
   const [distros, setDistros] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   useEffect(() => {
     void detectAgents().then(setDetected).catch(() => {});
@@ -137,7 +138,12 @@ export default function Sidebar() {
         {mine.map((a) => (
           <li key={a.id} className={runtime[a.id]?.ptyId && !runtime[a.id].exited ? "" : "exited"}>
             <span className="sb-main">
-              <InlineName value={a.name} onCommit={(n) => renameAgent(a.id, n)} />
+              <InlineName
+                value={a.name}
+                onCommit={(n) => renameAgent(a.id, n)}
+                editing={renamingId === a.id}
+                onEditingChange={(v) => setRenamingId(v ? a.id : null)}
+              />
               {a.worktree && <small title={a.worktree.path}> ⎇</small>}
               {a.hibernated && <small> hibernated</small>}
             </span>
@@ -145,6 +151,9 @@ export default function Sidebar() {
               const u = runtime[a.id]?.ptyId ? tick?.agents[runtime[a.id].ptyId!] : undefined;
               return u && <small className="sb-stats" title={`${u.processes} processes`}>{fmtBytes(u.privateBytes)}</small>;
             })()}
+            <button aria-label={`Rename ${a.name}`} title="Rename" onClick={() => setRenamingId(a.id)}>
+              ✎
+            </button>
             <button aria-label={`Close ${a.name}`} onClick={() => closeAgent(a.id)}>×</button>
           </li>
         ))}

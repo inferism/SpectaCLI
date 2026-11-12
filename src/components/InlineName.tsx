@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 interface Props {
   /** The name to start editing from. */
@@ -7,30 +7,44 @@ interface Props {
   display?: string;
   onCommit: (name: string) => void;
   className?: string;
+  /** Set both to let the parent start editing (e.g. from a pencil button). */
+  editing?: boolean;
+  onEditingChange?: (editing: boolean) => void;
 }
 
 /** A name that turns into a text box on double-click. Enter or blur saves, Escape cancels. */
-export default function InlineName({ value, display, onCommit, className }: Props) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
+export default function InlineName({ value, display, onCommit, className, editing: controlled, onEditingChange }: Props) {
+  const [own, setOwn] = useState(false);
+  const editing = controlled ?? own;
+  const setEditing = (v: boolean) => (onEditingChange ? onEditingChange(v) : setOwn(v));
 
   if (!editing) {
     return (
-      <span
-        className={className}
-        title="Double-click to rename"
-        onDoubleClick={() => {
-          setDraft(value);
-          setEditing(true);
-        }}
-      >
+      <span className={className} title="Double-click to rename" onDoubleClick={() => setEditing(true)}>
         {display ?? value}
       </span>
     );
   }
-  const finish = (save: boolean) => {
-    setEditing(false);
-    if (save && draft.trim() && draft.trim() !== value) onCommit(draft);
+  return (
+    <EditBox
+      initial={value}
+      onDone={(name) => {
+        setEditing(false);
+        if (name !== null && name.trim() && name.trim() !== value) onCommit(name);
+      }}
+    />
+  );
+}
+
+/** Mounted fresh for each edit, so the draft always starts from the current name. */
+function EditBox({ initial, onDone }: { initial: string; onDone: (name: string | null) => void }) {
+  const [draft, setDraft] = useState(initial);
+  // Unmounting blurs the box; without this, Escape would also save on that blur.
+  const finished = useRef(false);
+  const finish = (name: string | null) => {
+    if (finished.current) return;
+    finished.current = true;
+    onDone(name);
   };
   return (
     <input
@@ -41,10 +55,10 @@ export default function InlineName({ value, display, onCommit, className }: Prop
       aria-label="Agent name"
       onFocus={(e) => e.currentTarget.select()}
       onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => finish(true)}
+      onBlur={() => finish(draft)}
       onKeyDown={(e) => {
-        if (e.key === "Enter") finish(true);
-        if (e.key === "Escape") finish(false);
+        if (e.key === "Enter") finish(draft);
+        if (e.key === "Escape") finish(null);
       }}
     />
   );
