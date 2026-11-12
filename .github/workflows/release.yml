@@ -1,0 +1,47 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the installers and attach them to a draft
+# GitHub Release. Nothing is published until you press Publish on the draft.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: npm ci
+      # Bundled ConPTY (src-tauri/tauri.conpty.conf.json adds it as resources).
+      - run: npm run conpty
+      # The notify helper is built by beforeBuildCommand (npm run notify -- --release).
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: SpectaCLI ${{ github.ref_name }}
+          releaseBody: See the assets below to install. Verify the SHA-256 hashes in SHA256SUMS.txt.
+          releaseDraft: true
+          prerelease: false
+          # Both installers: NSIS .exe (per-user, no admin) and .msi.
+          args: --bundles nsis,msi --config src-tauri/tauri.conpty.conf.json
+      - name: Publish SHA-256 hashes
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem src-tauri/target/release/bundle -Recurse -Include *.exe,*.msi
+          $files | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } | Set-Content SHA256SUMS.txt
+          gh release upload "${{ github.ref_name }}" SHA256SUMS.txt --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

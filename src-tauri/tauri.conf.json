@@ -28,6 +28,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "windows": {
+      "nsis": { "installMode": "currentUser" }
+    },
     "externalBin": ["binaries/spectacli-notify"],
     "icon": [
       "icons/32x32.png",
