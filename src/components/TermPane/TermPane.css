@@ -1,0 +1,52 @@
+.termpane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border: 1px solid #23262e;
+}
+
+.termpane-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 6px 0 10px;
+  background: #161920;
+  font-size: 12px;
+  flex: none;
+}
+
+.termpane-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #5c6370;
+}
+
+.termpane-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.termpane-header button {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.termpane-header button:hover {
+  background: #23262e;
+}
+
+.termpane-term {
+  flex: 1;
+  min-height: 0;
+  padding: 4px;
+  background: #0f1115;
+}
