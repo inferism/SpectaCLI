@@ -34,23 +34,51 @@ export default function PaneGrid() {
 function ProjectGrid({ project, visible, windowShown }: { project: Project; visible: boolean; windowShown: boolean }) {
   const runtime = useWorkspace((s) => s.runtime);
   const toggleMaximize = useWorkspace((s) => s.toggleMaximize);
+  const setLayoutMode = useWorkspace((s) => s.setLayoutMode);
+  const focusAgent = useWorkspace((s) => s.focusAgent);
   const conv = activeConversation(project);
   const agents = conv.agents;
   if (agents.length === 0) return null;
 
   const { cols, rows } = gridDims(agents.length);
-  const maximized = agents.some((a) => a.id === conv.layout.maximizedAgentId) ? conv.layout.maximizedAgentId : null;
+  const focusMode = conv.layout.mode === "focus";
+  const focusedId = agents.some((a) => a.id === conv.layout.focusedAgentId) ? conv.layout.focusedAgentId : agents[0].id;
+  // Focus mode is a maximize that the tab strip drives, so it reuses the same single-cell grid.
+  const maximized = focusMode
+    ? focusedId
+    : agents.some((a) => a.id === conv.layout.maximizedAgentId)
+      ? conv.layout.maximizedAgentId
+      : null;
   // Past 3x3 the rows stay at a third of the viewport and the grid scrolls.
   const rowSize = `calc(100% / ${Math.min(rows, 3)})`;
 
   return (
+    <div className="project-grid" style={visible ? undefined : { display: "none" }}>
+      <div className="layout-bar">
+        <div className="layout-toggle">
+          <button className={focusMode ? "" : "on"} onClick={() => setLayoutMode(project.id, "grid")}>Grid</button>
+          <button className={focusMode ? "on" : ""} onClick={() => setLayoutMode(project.id, "focus")}>Focus</button>
+        </div>
+        {focusMode && (
+          <div className="layout-tabs">
+            {agents.map((a) => (
+              <button
+                key={a.id}
+                className={a.id === focusedId ? "on" : ""}
+                onClick={() => focusAgent(project.id, a.id)}
+              >
+                {runtime[a.id]?.exited ? `${a.name} (exited)` : a.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
     <div
       className="grid"
       style={{
         ...(maximized
           ? { gridTemplateColumns: "1fr", gridAutoRows: "100%" }
           : { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: rowSize }),
-        ...(visible ? {} : { display: "none" }),
       }}
     >
       {agents.map((a) => {
@@ -64,7 +92,7 @@ function ProjectGrid({ project, visible, windowShown }: { project: Project; visi
                 ptyId={rt.ptyId}
                 visible={visible && shown && windowShown}
                 name={name}
-                maximized={maximized === a.id}
+                maximized={!focusMode && maximized === a.id}
                 onToggleMaximize={() => toggleMaximize(project.id, a.id)}
               />
             ) : (
@@ -78,6 +106,7 @@ function ProjectGrid({ project, visible, windowShown }: { project: Project; visi
           </div>
         );
       })}
+    </div>
     </div>
   );
 }

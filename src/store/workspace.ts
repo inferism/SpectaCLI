@@ -16,6 +16,9 @@ export interface AgentInstance {
 }
 
 export interface Layout {
+  mode: "grid" | "focus";
+  /** Focus mode shows this agent; falls back to the first when unset or gone. */
+  focusedAgentId: string | null;
   maximizedAgentId: string | null;
 }
 
@@ -76,6 +79,8 @@ interface WorkspaceState {
   /** From `agent:exit`, which reports the PTY id. */
   markExited: (ptyId: string) => void;
   toggleMaximize: (projectId: string, instanceId: string) => void;
+  setLayoutMode: (projectId: string, mode: Layout["mode"]) => void;
+  focusAgent: (projectId: string, instanceId: string) => void;
 }
 
 const now = () => new Date().toISOString();
@@ -90,7 +95,7 @@ export const activeConversation = (p: Project): Conversation =>
   p.conversations.find((c) => c.id === p.activeConversationId) ?? p.conversations[0];
 
 function newConversation(): Conversation {
-  return { id: crypto.randomUUID(), title: "Default", createdAt: now(), agents: [], layout: { maximizedAgentId: null } };
+  return { id: crypto.randomUUID(), title: "Default", createdAt: now(), agents: [], layout: { mode: "grid", focusedAgentId: null, maximizedAgentId: null } };
 }
 
 /** Repair what a hand-edited or partial file might lack. */
@@ -105,7 +110,12 @@ function normalizeProject(p: Project): Project {
     conversations: conversations.map((c) => ({
       ...c,
       agents: c.agents ?? [],
-      layout: { ...c.layout, maximizedAgentId: c.layout?.maximizedAgentId ?? null },
+      layout: {
+        ...c.layout,
+        mode: c.layout?.mode === "focus" ? "focus" : "grid",
+        focusedAgentId: c.layout?.focusedAgentId ?? null,
+        maximizedAgentId: c.layout?.maximizedAgentId ?? null,
+      },
     })),
     activeConversationId,
   };
@@ -275,6 +285,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
               layout: {
                 ...c.layout,
                 maximizedAgentId: c.layout.maximizedAgentId === instanceId ? null : c.layout.maximizedAgentId,
+                focusedAgentId: c.layout.focusedAgentId === instanceId ? null : c.layout.focusedAgentId,
               },
             }))
           : s.projects,
@@ -296,6 +307,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       projects: updateConversation(s.projects, projectId, (c) => ({
         ...c,
         layout: { ...c.layout, maximizedAgentId: c.layout.maximizedAgentId === instanceId ? null : instanceId },
+      })),
+    })),
+
+  setLayoutMode: (projectId, mode) =>
+    set((s) => ({
+      projects: updateConversation(s.projects, projectId, (c) => ({ ...c, layout: { ...c.layout, mode } })),
+    })),
+
+  focusAgent: (projectId, instanceId) =>
+    set((s) => ({
+      projects: updateConversation(s.projects, projectId, (c) => ({
+        ...c,
+        layout: { ...c.layout, focusedAgentId: instanceId },
       })),
     })),
 }));

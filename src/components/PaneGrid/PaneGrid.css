@@ -16,3 +16,55 @@
   opacity: 0.5;
   font-size: 13px;
 }
+
+.project-grid {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.project-grid > .grid {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+
+.layout-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  padding: 0 6px;
+  flex: none;
+  font-size: 11px;
+}
+
+.layout-toggle,
+.layout-tabs {
+  display: flex;
+  gap: 2px;
+}
+
+.layout-tabs {
+  overflow-x: auto;
+}
+
+.layout-bar button {
+  border: 0;
+  border-radius: 4px;
+  padding: 2px 8px;
+  background: transparent;
+  color: var(--fg);
+  opacity: 0.6;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.layout-bar button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.layout-bar button.on {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
+}

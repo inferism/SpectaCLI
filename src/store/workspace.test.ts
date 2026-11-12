@@ -46,6 +46,18 @@ test("switching projects keeps each project's agents and maximize", async () => 
   expect(killed).toEqual([]);
 });
 
+test("focus mode keeps the focused agent, cleared when it closes", async () => {
+  ws().addProject("C:\a");
+  const a = ws().activeProjectId!;
+  const x = (await ws().launch(a, { command: "x" }))!;
+  ws().setLayoutMode(a, "focus");
+  ws().focusAgent(a, x);
+  const layout = () => activeConversation(ws().projects[0]).layout;
+  expect(layout()).toMatchObject({ mode: "focus", focusedAgentId: x });
+  ws().closeAgent(x);
+  expect(layout().focusedAgentId).toBeNull();
+});
+
 test("persisted ids are instance ids, PTY ids stay runtime-only", async () => {
   ws().addProject("C:\\a");
   const id = (await ws().launch(ws().activeProjectId!, { defId: "claude", name: "Claude Code" }))!;
