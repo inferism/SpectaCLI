@@ -4,7 +4,7 @@ import TermPane from "../TermPane/TermPane";
 import WorktreeMenu from "../TermPane/WorktreeMenu";
 import { useWindowShown } from "../../lib/windowShown";
 import BroadcastBar from "./BroadcastBar";
-import { gridDims } from "./gridDims";
+import { gridDims, lastSpan } from "./gridDims";
 import "./PaneGrid.css";
 
 /**
@@ -103,13 +103,18 @@ function ProjectGrid({
           : { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: rowSize }),
       }}
     >
-      {agents.map((a) => {
+      {agents.map((a, i) => {
         const rt = runtime[a.id];
         const shown = !maximized || maximized === a.id;
+        const span = !maximized && i === agents.length - 1 ? lastSpan(agents.length) : 1;
         const base = rt?.note ? `${a.name} · ${rt.note}` : a.name;
         const name = rt?.exited ? `${base} (exited)` : base;
         return (
-          <div key={a.id} className="grid-cell" style={shown ? undefined : { display: "none" }}>
+          <div
+            key={a.id}
+            className="grid-cell"
+            style={shown ? (span > 1 ? { gridColumn: `span ${span}` } : undefined) : { display: "none" }}
+          >
             {rt?.ptyId ? (
               <TermPane
                 ptyId={rt.ptyId}

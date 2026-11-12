@@ -6,3 +6,10 @@ export function gridDims(n: number): { cols: number; rows: number } {
   if (n <= 6) return { cols: 3, rows: 2 };
   return { cols: 3, rows: Math.ceil(n / 3) };
 }
+
+/** Columns the last pane spans so a part-filled row leaves no empty cell (3 panes: the third spans both). */
+export function lastSpan(n: number): number {
+  const { cols } = gridDims(n);
+  const rest = n % cols;
+  return rest === 0 ? 1 : cols - rest + 1;
+}
