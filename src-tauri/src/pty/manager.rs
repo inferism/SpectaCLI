@@ -21,6 +21,9 @@ const SHIM_VAR: &str = "SPECTACLI_CMDLINE";
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 
 pub struct SpawnRequest {
+    /// Agent id to use; a new one when `None`. Set it when the id must be
+    /// known before launch (it goes into hook arguments).
+    pub id: Option<String>,
     pub launch: LaunchSpec,
     /// Appended after the launch spec's own args (session/profile args).
     pub args: Vec<String>,
@@ -128,7 +131,7 @@ impl PtyManager {
             }
         };
 
-        let id = uuid::Uuid::now_v7().to_string();
+        let id = req.id.clone().unwrap_or_else(|| uuid::Uuid::now_v7().to_string());
         let output = Output::new(ring::DEFAULT_CAP);
         let agent = Arc::new(Agent {
             output: output.clone(),
@@ -268,6 +271,7 @@ mod tests {
 
     fn req(kind: LaunchKind, program: &str, args: &[&str], extra: &[&str]) -> SpawnRequest {
         SpawnRequest {
+            id: None,
             launch: LaunchSpec { kind, program: program.into(), args: args.iter().map(|s| s.to_string()).collect() },
             args: extra.iter().map(|s| s.to_string()).collect(),
             cwd: std::env::temp_dir(),

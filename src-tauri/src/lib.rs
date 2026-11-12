@@ -1,9 +1,11 @@
 mod pty;
 mod registry;
 mod stats;
+mod status;
 mod store;
 
 use pty::{PtyManager, SpawnRequest};
+use status::StatusHub;
 use registry::{DetectedAgent, LaunchKind, LaunchSpec};
 use serde::Serialize;
 use std::path::PathBuf;
@@ -90,6 +92,9 @@ async fn spawn_agent(
     tauri::async_runtime::spawn_blocking(move || {
         let find = |agents: &[DetectedAgent]| agents.iter().find(|a| a.def.id == agent_def_id).cloned();
         let mut name = agent_def_id.clone();
+        // Chosen up front: hook arguments carry it.
+        let id = uuid::Uuid::now_v7().to_string();
+        let status = app.state::<StatusHub>();
         let result = retry_mid_update(
             |n| {
                 // Retries detect again: an update can move or replace the exe.
@@ -98,9 +103,12 @@ async fn spawn_agent(
                     .or_else(|| find(&detect_and_store(&app)))
                     .ok_or_else(|| format!("agent `{agent_def_id}` is not installed"))?;
                 name = agent.def.name.clone();
+                // Tracking starts before launch so an early hook isn't lost.
+                let args = status.prepare(&id, agent.def.hook.as_ref().map(|h| h.kind.as_str()));
                 app.state::<PtyManager>().spawn(SpawnRequest {
+                    id: Some(id.clone()),
                     launch: agent.launch,
-                    args: vec![],
+                    args,
                     cwd: cwd.clone(),
                     env: vec![],
                     cols,
@@ -110,6 +118,7 @@ async fn spawn_agent(
             std::thread::sleep,
         );
         result.map_err(|e| {
+            status.tracker.forget(&id);
             eprintln!("spawn {name}: {}", e.detail);
             if e.updating {
                 format!("{name} could not start because it is updating itself. Try again in a moment.")
@@ -141,7 +150,7 @@ async fn spawn_custom(
             program: PathBuf::from(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())),
             args: vec!["/d".into(), "/s".into(), "/c".into(), command],
         };
-        app.state::<PtyManager>().spawn(SpawnRequest { launch, args: vec![], cwd, env: vec![], cols, rows })
+        app.state::<PtyManager>().spawn(SpawnRequest { id: None, launch, args: vec![], cwd, env: vec![], cols, rows })
     })
     .await
     .map_err(|e| e.to_string())?
@@ -221,7 +230,14 @@ pub fn run() {
         .manage(StoreLock::default())
         .setup(|app| {
             let handle = app.handle().clone();
+            let hub = StatusHub::start(Arc::new(move |change| {
+                let _ = handle.emit("agent:status", change);
+            }));
+            let tracker = hub.tracker.clone();
+            app.manage(hub);
+            let handle = app.handle().clone();
             app.manage(PtyManager::new(Arc::new(move |id, code| {
+                tracker.exited(id);
                 let _ = handle.emit("agent:exit", AgentExit { agent_id: id.into(), code });
             })));
             stats::spawn(app.handle().clone());
