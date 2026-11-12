@@ -2,6 +2,12 @@
   display: grid;
   height: 100%;
   overflow-y: auto;
+  /* Still scrolls with the wheel when there are many rows; just no bar. */
+  scrollbar-width: none;
+}
+
+.grid::-webkit-scrollbar {
+  display: none;
 }
 
 .grid-cell {
