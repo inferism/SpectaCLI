@@ -195,8 +195,25 @@ function Xterm({ ptyId, hadFocus }: { ptyId: string; hadFocus: RefObject<boolean
     });
     ro.observe(el);
 
+    // Dragging the window to a monitor with another scale factor changes the
+    // cell size in device pixels without resizing the element, so the
+    // ResizeObserver stays silent. Refit when the pixel ratio changes.
+    let dprQuery: MediaQueryList | undefined;
+    const onDpr = () => {
+      if (disposed) return;
+      sync();
+      watchDpr();
+    };
+    const watchDpr = () => {
+      dprQuery?.removeEventListener("change", onDpr);
+      dprQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+      dprQuery.addEventListener("change", onDpr, { once: true });
+    };
+    watchDpr();
+
     return () => {
       disposed = true;
+      dprQuery?.removeEventListener("change", onDpr);
       clearTimeout(timer);
       ro.disconnect();
       input.dispose();

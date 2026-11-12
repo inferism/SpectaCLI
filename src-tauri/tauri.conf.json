@@ -15,7 +15,10 @@
         "title": "SpectaCLI",
         "decorations": false,
         "width": 1200,
-        "height": 760
+        "height": 760,
+        "minWidth": 640,
+        "minHeight": 400,
+        "center": true
       }
     ],
     "security": {
