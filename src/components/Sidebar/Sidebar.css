@@ -130,3 +130,24 @@
   margin-right: 7px;
   vertical-align: 1px;
 }
+
+/* Row actions appear on hover or keyboard focus, so the list stays calm. */
+.sb-list .sb-act {
+  opacity: 0;
+}
+
+.sb-list li:hover .sb-act,
+.sb-list li:focus-within .sb-act {
+  opacity: 0.8;
+}
+
+.sb-list .sb-act:hover,
+.sb-list .sb-act:focus-visible {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .sb-list .sb-act {
+    opacity: 0.8;
+  }
+}
