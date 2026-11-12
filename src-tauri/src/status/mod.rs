@@ -30,7 +30,8 @@ pub enum Status {
 pub enum Source {
     Launch,
     /// An injected CLI hook: accurate, and once an agent has reported one,
-    /// the weaker sources below are ignored for it.
+    /// the weaker sources below are ignored for it, except the user's own
+    /// keys for the changes its hook can't report (see `Tracker::user_input`).
     Hook,
     /// BEL or an OSC notification/progress sequence in the output.
     Terminal,
@@ -67,6 +68,9 @@ struct Entry {
     status: Status,
     /// A hook reported for this agent: it is the only source we trust now.
     hooked: bool,
+    /// Its hook reports a submitted prompt (Claude's UserPromptSubmit).
+    /// Codex's `notify` only reports turn ends, so Enter must mark it working.
+    hook_reports_prompt: bool,
     parser: Parser,
     /// Recent printable output, for `prompt`.
     tail: String,
@@ -87,11 +91,12 @@ impl Tracker {
     }
 
     /// Start tracking an agent that is about to launch. `prompt` is the
-    /// regex for the output heuristic.
-    pub fn start(&self, id: &str, prompt: Option<Regex>) {
+    /// regex for the output heuristic; `hook_kind` is the registry's hook kind.
+    pub fn start(&self, id: &str, prompt: Option<Regex>, hook_kind: Option<&str>) {
         let entry = Entry {
             status: Status::Starting,
             hooked: false,
+            hook_reports_prompt: hook_kind == Some("claude-settings"),
             parser: Parser::default(),
             tail: String::new(),
             prompt,
@@ -107,12 +112,17 @@ impl Tracker {
     }
 
     pub fn set(&self, id: &str, status: Status, source: Source) {
+        self.update(id, status, source, false);
+    }
+
+    /// `over_hook`: apply even to an agent whose hook owns its status.
+    fn update(&self, id: &str, status: Status, source: Source, over_hook: bool) {
         {
             let mut agents = lock(&self.agents);
             let Some(e) = agents.get_mut(id) else { return };
             if source == Source::Hook {
                 e.hooked = true;
-            } else if e.hooked {
+            } else if e.hooked && !over_hook {
                 return;
             }
             if e.status == status {
@@ -172,20 +182,40 @@ impl Tracker {
 
     /// The user typed into the agent. Enter on an idle agent submits a
     /// prompt, and on one that asked for input it answers; either way it is
-    /// working again. Does nothing for agents that report through hooks.
+    /// working again.
+    ///
+    /// Agents with hooks get only what their hooks miss: Enter on a question
+    /// (no hook fires until the approved tool finishes), Enter on an idle
+    /// Codex (its `notify` has no prompt event), and a lone Esc, which
+    /// interrupts a turn without Claude's Stop hook or Codex's turn-complete.
     pub fn user_input(&self, id: &str, data: &[u8], now: Instant) {
-        if !data.contains(&b'\r') {
+        let enter = data.contains(&b'\r');
+        let esc = data == b"\x1b";
+        if !enter && !esc {
             return;
         }
-        let answered = {
+        let next = {
             let mut agents = lock(&self.agents);
-            let Some(e) = agents.get_mut(id).filter(|e| !e.hooked) else { return };
-            e.tail.clear();
-            e.last_output = Some(now);
-            matches!(e.status, Status::Idle | Status::NeedsInput)
+            let Some(e) = agents.get_mut(id) else { return };
+            if !e.hooked {
+                if !enter {
+                    return;
+                }
+                e.tail.clear();
+                e.last_output = Some(now);
+                matches!(e.status, Status::Idle | Status::NeedsInput).then_some(Status::Working)
+            } else if esc {
+                matches!(e.status, Status::Working | Status::NeedsInput).then_some(Status::Idle)
+            } else {
+                match e.status {
+                    Status::NeedsInput => Some(Status::Working),
+                    Status::Idle if !e.hook_reports_prompt => Some(Status::Working),
+                    _ => None,
+                }
+            }
         };
-        if answered {
-            self.set(id, Status::Working, Source::Heuristic);
+        if let Some(s) = next {
+            self.update(id, s, Source::Heuristic, true);
         }
     }
 
@@ -388,7 +418,7 @@ impl StatusHub {
         let prompt = Regex::new(prompt.unwrap_or(DEFAULT_PROMPT))
             .map_err(|e| eprintln!("status: bad prompt regex for {agent_id}: {e}"))
             .ok();
-        self.tracker.start(agent_id, prompt);
+        self.tracker.start(agent_id, prompt, hook_kind);
         args
     }
 }
@@ -409,7 +439,7 @@ mod tests {
     fn emits_changes_only_for_live_agents() {
         let (t, log) = tracker();
         t.set("a", Status::Working, Source::Hook); // unknown: dropped
-        t.start("a", None);
+        t.start("a", None, None);
         t.set("a", Status::Working, Source::Hook);
         t.set("a", Status::Working, Source::Hook); // unchanged: dropped
         t.set("a", Status::Idle, Source::Hook);
@@ -429,8 +459,48 @@ mod tests {
 
     fn quiet_tracker(prompt: Option<&str>) -> (Tracker, Log) {
         let (t, log) = tracker();
-        t.start("a", prompt.map(|p| Regex::new(p).unwrap()));
+        t.start("a", prompt.map(|p| Regex::new(p).unwrap()), None);
         (t, log)
+    }
+
+    fn hooked_tracker(kind: &str) -> (Tracker, Log) {
+        let (t, log) = tracker();
+        t.start("a", None, Some(kind));
+        (t, log)
+    }
+
+    #[test]
+    fn enter_starts_every_codex_turn() {
+        // Codex's notify only reports turn ends; Enter marks the turn start.
+        let (t, log) = hooked_tracker("codex-notify");
+        let now = Instant::now();
+        t.set("a", Status::Idle, Source::Heuristic); // went quiet after its banner
+        for _ in 0..2 {
+            t.user_input("a", b"\r", now);
+            t.set("a", Status::Idle, Source::Hook);
+        }
+        t.output("a", b"\x07", now); // still ignored: the hook owns it
+        let states: Vec<_> = lock(&log).iter().map(|s| s.0).collect();
+        use Status::{Idle, Starting, Working};
+        assert_eq!(states, [Starting, Idle, Working, Idle, Working, Idle]);
+    }
+
+    #[test]
+    fn claude_keys_cover_what_its_hooks_miss() {
+        let (t, log) = hooked_tracker("claude-settings");
+        let now = Instant::now();
+        t.set("a", Status::Idle, Source::Hook);
+        t.user_input("a", b"\r", now); // UserPromptSubmit reports this, not Enter
+        t.set("a", Status::Working, Source::Hook);
+        t.user_input("a", b"\x1b[A", now); // an arrow key is not Esc
+        t.user_input("a", b"\x1b", now); // interrupt: no Stop hook follows
+        t.set("a", Status::NeedsInput, Source::Hook);
+        t.user_input("a", b"\r", now); // approved; the tool runs before PostToolUse
+        let got: Vec<_> = lock(&log).iter().map(|s| s.0).collect();
+        assert_eq!(
+            got,
+            [Status::Starting, Status::Idle, Status::Working, Status::Idle, Status::NeedsInput, Status::Working]
+        );
     }
 
     #[test]
@@ -553,7 +623,7 @@ mod tests {
         let mut args = hooks.args(&det.def.hook.as_ref().unwrap().kind, &id);
         args.extend(extra.iter().map(|a| a.to_string()));
         assert!(!args.is_empty());
-        tracker.start(&id, None);
+        tracker.start(&id, None, Some(&det.def.hook.as_ref().unwrap().kind));
         let pty = PtyManager::new(Arc::new(|_, _| {}));
         let out = Arc::new(Mutex::new(Vec::new()));
         let o = out.clone();
