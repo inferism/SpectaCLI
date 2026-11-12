@@ -18,6 +18,19 @@ use std::time::Duration;
 /// `cmd /d /c %SPECTACLI_CMDLINE%` and let cmd expand it with its own rules.
 const SHIM_VAR: &str = "SPECTACLI_CMDLINE";
 
+/// Env vars a parent Claude Code session sets for its own children.
+const INHERITED_SESSION_MARKERS: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_PID",
+];
+
 /// Device Status Report: "where is the cursor?"
 const CURSOR_QUERY: &[u8] = b"\x1b[6n";
 
@@ -94,6 +107,13 @@ fn build_command(req: &SpawnRequest) -> CommandBuilder {
         }
     }
     cmd.cwd(&req.cwd);
+    // Started from a terminal inside Claude Code, Spectacli inherits markers
+    // that tie a process to that session. Claude then treats each agent as
+    // its child and, among other things, stops saving transcripts, so the
+    // session could never be resumed. Settings (API keys, CLAUDE_CONFIG_DIR) stay.
+    for k in INHERITED_SESSION_MARKERS {
+        cmd.env_remove(k);
+    }
     cmd.env("COLORTERM", "truecolor");
     for (k, v) in &req.env {
         cmd.env(k, v);
@@ -405,6 +425,18 @@ mod tests {
         }
         rx.recv_timeout(Duration::from_secs(10)).expect("exit hook fires after kill");
         assert!(m.ids().is_empty());
+    }
+
+    #[test]
+    fn parent_claude_session_markers_are_not_inherited() {
+        // SAFETY: no other test reads or writes this variable.
+        unsafe { std::env::set_var("CLAUDE_CODE_CHILD_SESSION", "1") };
+        let (m, rx) = manager();
+        let id = m
+            .spawn(req(LaunchKind::Exe, "cmd.exe", &["/d", "/c"], &["echo", "[%CLAUDE_CODE_CHILD_SESSION%]"]))
+            .unwrap();
+        let (out, _) = run_to_exit(&m, &rx, &id);
+        assert!(out.contains("[%CLAUDE_CODE_CHILD_SESSION%]"), "variable is unset in the agent: {out:?}");
     }
 
     const GAP: Duration = Duration::from_millis(300);
