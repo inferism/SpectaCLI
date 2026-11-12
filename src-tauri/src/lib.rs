@@ -77,20 +77,23 @@ async fn spawn_custom(
 
 /// Route the agent's live output to `on_output` (raw bytes, batched) and
 /// return the scrollback to write first. Replaces any previous pane.
+/// `attach_id` is chosen by the pane and passed back to `detach_agent`.
 #[tauri::command]
 async fn attach_agent(
     pty: State<'_, PtyManager>,
     agent_id: String,
+    attach_id: u64,
     on_output: Channel<InvokeResponseBody>,
 ) -> Result<Response, String> {
-    let scrollback = pty.attach(&agent_id, Box::new(move |d| on_output.send(InvokeResponseBody::Raw(d)).is_ok()))?;
+    let scrollback = pty.attach(&agent_id, attach_id, Box::new(move |d| on_output.send(InvokeResponseBody::Raw(d)).is_ok()))?;
     Ok(Response::new(scrollback))
 }
 
-/// Stop sending output (pane hidden). The agent keeps running and buffering.
+/// Stop sending output (pane gone). The agent keeps running and buffering.
+/// Ignored if another pane has attached since `attach_id`.
 #[tauri::command]
-async fn detach_agent(pty: State<'_, PtyManager>, agent_id: String) -> Result<(), String> {
-    pty.detach(&agent_id)
+async fn detach_agent(pty: State<'_, PtyManager>, agent_id: String, attach_id: u64) -> Result<(), String> {
+    pty.detach(&agent_id, attach_id)
 }
 
 #[tauri::command]

@@ -195,12 +195,13 @@ impl PtyManager {
     }
 
     /// See `Output::attach`.
-    pub fn attach(&self, id: &str, sink: Sink) -> Result<Vec<u8>, String> {
-        Ok(self.get(id)?.output.attach(sink))
+    pub fn attach(&self, id: &str, sink_id: u64, sink: Sink) -> Result<Vec<u8>, String> {
+        Ok(self.get(id)?.output.attach(sink_id, sink))
     }
 
-    pub fn detach(&self, id: &str) -> Result<(), String> {
-        self.get(id)?.output.detach();
+    /// See `Output::detach_if`.
+    pub fn detach(&self, id: &str, sink_id: u64) -> Result<(), String> {
+        self.get(id)?.output.detach_if(sink_id);
         Ok(())
     }
 
@@ -273,7 +274,7 @@ mod tests {
     /// Attach and collect output until the exit hook fires.
     fn run_to_exit(m: &PtyManager, rx: &mpsc::Receiver<(String, Option<u32>)>, id: &str) -> (String, Option<u32>) {
         let (tx, out) = mpsc::channel();
-        let mut text = String::from_utf8_lossy(&m.attach(id, Box::new(move |d| tx.send(d).is_ok())).unwrap()).into_owned();
+        let mut text = String::from_utf8_lossy(&m.attach(id, 1, Box::new(move |d| tx.send(d).is_ok())).unwrap()).into_owned();
         let (exited, code) = rx.recv_timeout(Duration::from_secs(10)).expect("agent exited");
         assert_eq!(exited, id);
         for d in out.try_iter() {

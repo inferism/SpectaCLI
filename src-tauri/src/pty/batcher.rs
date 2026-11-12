@@ -17,6 +17,9 @@ struct State {
     ring: Ring,
     pending: Vec<u8>,
     sink: Option<Sink>,
+    /// Caller-chosen id of the current sink, so a late detach from a pane
+    /// that was replaced can't cut off the new one.
+    sink_id: u64,
     closed: bool,
 }
 
@@ -28,7 +31,7 @@ pub struct Output {
 impl Output {
     pub fn new(scrollback: usize) -> Arc<Self> {
         Arc::new(Self {
-            state: Mutex::new(State { ring: Ring::new(scrollback), pending: Vec::new(), sink: None, closed: false }),
+            state: Mutex::new(State { ring: Ring::new(scrollback), pending: Vec::new(), sink: None, sink_id: 0, closed: false }),
             cv: Condvar::new(),
         })
     }
@@ -53,17 +56,28 @@ impl Output {
     /// Route live output to `sink` and return the scrollback to replay first.
     /// Atomic with `push`: every byte is either in the returned snapshot or
     /// sent to `sink`, never both or neither. Replaces any previous sink.
-    pub fn attach(&self, sink: Sink) -> Vec<u8> {
+    pub fn attach(&self, sink_id: u64, sink: Sink) -> Vec<u8> {
         let mut s = self.lock();
         s.pending.clear();
         s.sink = Some(sink);
+        s.sink_id = sink_id;
         s.ring.snapshot()
     }
 
+    /// Detach whatever is attached.
     pub fn detach(&self) {
         let mut s = self.lock();
         s.sink = None;
         s.pending.clear();
+    }
+
+    /// Detach only if `sink_id` is still the attached sink.
+    pub fn detach_if(&self, sink_id: u64) {
+        let mut s = self.lock();
+        if s.sink_id == sink_id {
+            s.sink = None;
+            s.pending.clear();
+        }
     }
 
     /// The PTY reached EOF: flush what is pending, then stop the flusher.
@@ -116,7 +130,7 @@ mod tests {
     fn coalesces_bursts_into_one_message() {
         let out = Output::new(1024);
         let (sink, rx) = channel_sink();
-        assert!(out.attach(sink).is_empty());
+        assert!(out.attach(1, sink).is_empty());
         let t = spawn_flusher(&out);
         out.push(b"a");
         out.push(b"b");
@@ -132,13 +146,13 @@ mod tests {
         let out = Output::new(1024);
         out.push(b"before ");
         let (sink, rx) = channel_sink();
-        assert_eq!(out.attach(sink), b"before ");
+        assert_eq!(out.attach(1, sink), b"before ");
         let t = spawn_flusher(&out);
         out.push(b"after");
         assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap(), b"after");
         // A re-attach gets everything in the snapshot and nothing pending.
         let (sink2, rx2) = channel_sink();
-        assert_eq!(out.attach(sink2), b"before after");
+        assert_eq!(out.attach(2, sink2), b"before after");
         out.close();
         t.join().unwrap();
         assert!(rx2.try_recv().is_err());
@@ -147,7 +161,7 @@ mod tests {
     #[test]
     fn dead_sink_detaches_and_close_flushes() {
         let out = Output::new(1024);
-        out.attach(Box::new(|_| false));
+        out.attach(1, Box::new(|_| false));
         let t = spawn_flusher(&out);
         out.push(b"x");
         std::thread::sleep(Duration::from_millis(100));
@@ -157,5 +171,18 @@ mod tests {
         out.close();
         t.join().unwrap();
         assert_eq!(out.lock().ring.snapshot(), b"xy");
+    }
+
+    #[test]
+    fn stale_detach_leaves_newer_sink_attached() {
+        let out = Output::new(1024);
+        let (old, _rx) = channel_sink();
+        out.attach(1, old);
+        let (new, _rx2) = channel_sink();
+        out.attach(2, new);
+        out.detach_if(1);
+        assert!(out.lock().sink.is_some());
+        out.detach_if(2);
+        assert!(out.lock().sink.is_none());
     }
 }

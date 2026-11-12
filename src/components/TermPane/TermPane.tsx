@@ -3,7 +3,7 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { useEffect, useRef } from "react";
-import { attachAgent, detachAgent, resizeAgent, writeAgent } from "../../lib/ipc";
+import { attachAgent, detachAgent, newAttachId, resizeAgent, writeAgent } from "../../lib/ipc";
 import "./TermPane.css";
 
 interface Props {
@@ -54,9 +54,10 @@ export default function TermPane({ agentId, name, maximized, onToggleMaximize }:
     fit.fit();
     const input = term.onData((d) => void writeAgent(agentId, d).catch(() => {}));
     // Size the PTY before replaying scrollback so output wraps correctly.
+    const attachId = newAttachId();
     void resizeAgent(agentId, term.cols, term.rows)
       .catch(() => {})
-      .then(() => (disposed ? undefined : attachAgent(agentId, (b) => term.write(b))));
+      .then(() => (disposed ? undefined : attachAgent(agentId, attachId, (b) => term.write(b))));
 
     const ro = new ResizeObserver(onResize);
     ro.observe(el);
@@ -66,7 +67,7 @@ export default function TermPane({ agentId, name, maximized, onToggleMaximize }:
       clearTimeout(timer);
       ro.disconnect();
       input.dispose();
-      void detachAgent(agentId).catch(() => {});
+      void detachAgent(agentId, attachId).catch(() => {});
       term.dispose();
     };
   }, [agentId]);

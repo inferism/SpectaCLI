@@ -41,11 +41,20 @@ export const onRegistryChanged = (cb: (agents: DetectedAgent[]) => void): Promis
 export const spawnAgent = (agentDefId: string, cwd: string, cols: number, rows: number) =>
   invoke<string>("spawn_agent", { agentDefId, cwd, cols, rows });
 
+// Starts from the clock so ids stay unique across a webview reload.
+let lastAttachId = Date.now();
+/** A fresh id for one pane's attachment; pass it to `attachAgent` and `detachAgent`. */
+export const newAttachId = () => ++lastAttachId;
+
 /**
  * Stream an agent's output to `onData`: the scrollback first, then live
  * batches, in order. Replaces any pane already attached to this agent.
  */
-export async function attachAgent(agentId: string, onData: (bytes: Uint8Array) => void): Promise<void> {
+export async function attachAgent(
+  agentId: string,
+  attachId: number,
+  onData: (bytes: Uint8Array) => void,
+): Promise<void> {
   // Live batches can arrive before the scrollback response; hold them until
   // the scrollback has been written. The two never overlap (Rust guarantees it).
   let early: Uint8Array[] | null = [];
@@ -55,14 +64,14 @@ export async function attachAgent(agentId: string, onData: (bytes: Uint8Array) =
     if (early) early.push(bytes);
     else onData(bytes);
   };
-  const scrollback = await invoke<ArrayBuffer>("attach_agent", { agentId, onOutput });
+  const scrollback = await invoke<ArrayBuffer>("attach_agent", { agentId, attachId, onOutput });
   onData(new Uint8Array(scrollback));
   early.forEach(onData);
   early = null;
 }
 
-/** Stop streaming (pane hidden). The agent keeps running and buffering. */
-export const detachAgent = (agentId: string) => invoke<void>("detach_agent", { agentId });
+/** Stop streaming (pane gone). The agent keeps running and buffering. No-op if a newer pane attached since. */
+export const detachAgent = (agentId: string, attachId: number) => invoke<void>("detach_agent", { agentId, attachId });
 export const writeAgent = (agentId: string, data: string) => invoke<void>("write", { agentId, data });
 export const resizeAgent = (agentId: string, cols: number, rows: number) =>
   invoke<void>("resize", { agentId, cols, rows });
