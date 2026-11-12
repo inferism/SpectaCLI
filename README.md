@@ -4,6 +4,18 @@ A lightweight desktop app that runs all your installed AI coding CLIs side by si
 
 > Early development. Not usable yet. See [PLAN.md](PLAN.md).
 
+## Install
+
+Download the `.exe` (per-user install, no admin needed) or the `.msi` (for managed environments) from the [latest release](https://github.com/inferism/Spectacli/releases/latest).
+
+The installers are not code-signed yet, so Windows SmartScreen may show "Windows protected your PC". To continue, click **More info**, then **Run anyway**. To check your download first, compare its hash with `SHA256SUMS.txt` on the release page:
+
+```powershell
+Get-FileHash .\SpectaCLI_0.1.0_x64-setup.exe -Algorithm SHA256
+```
+
+There is no auto-update yet: to update, install the newer release over the old one.
+
 ## Development
 
 Requires Node.js, Rust (MSVC toolchain), and WebView2 (included in Windows 11).
