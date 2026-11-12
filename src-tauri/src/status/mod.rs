@@ -313,6 +313,128 @@ mod tests {
         assert!(claude_args(Path::new(r"C:\a%b\x.exe"), "p", "i").is_none());
     }
 
+    /// Live check against the installed CLI, on the same path the app uses:
+    /// registry → hook args → ConPTY → helper → pipe → tracker. Sends one
+    /// prompt and prints every status. Uses your CLI account (one short
+    /// prompt). Needs `npm run notify` first:
+    /// `cargo test live_ -- --ignored --nocapture --test-threads 1`
+    #[cfg(windows)]
+    fn root() -> &'static Path {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+    }
+
+    #[cfg(windows)]
+    fn live(agent: &str, cwd: &Path, extra: &[&str], prompt: &str, done: impl Fn(&[Status]) -> bool) -> Vec<(Status, u128)> {
+        use crate::pty::{PtyManager, SpawnRequest};
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let root = root();
+        let helper = root.join("target/debug/spectacli-notify.exe");
+        assert!(helper.is_file(), "run `npm run notify` first");
+        let (tx, rx) = mpsc::channel();
+        let tx = Mutex::new(tx);
+        let tracker = Arc::new(Tracker::new(Arc::new(move |c| drop(lock(&tx).send(c)))));
+        let start = Instant::now();
+        let pipe = format!("spectacli-live-{}", uuid::Uuid::now_v7().simple());
+        let t = tracker.clone();
+        pipe::serve(&pipe, move |a, e, p| {
+            eprintln!("{:>6} ms  hook {e}", start.elapsed().as_millis());
+            if let Some(s) = classify(e, p) {
+                t.set(a, s, Source::Hook);
+            }
+        })
+        .unwrap();
+        let hooks = Hooks { pipe, helper };
+
+        let det = crate::registry::detect_agents(None).into_iter().find(|a| a.def.id == agent).expect("installed");
+        let id = format!("live-{agent}");
+        let mut args = hooks.args(&det.def.hook.as_ref().unwrap().kind, &id);
+        args.extend(extra.iter().map(|a| a.to_string()));
+        assert!(!args.is_empty());
+        tracker.start(&id);
+        let pty = PtyManager::new(Arc::new(|_, _| {}));
+        let out = Arc::new(Mutex::new(Vec::new()));
+        let o = out.clone();
+        pty.spawn(SpawnRequest {
+            id: Some(id.clone()),
+            launch: det.launch,
+            args,
+            cwd: cwd.into(),
+            env: vec![],
+            cols: 120,
+            rows: 40,
+        })
+        .unwrap();
+        pty.attach(&id, 1, Box::new(move |d| {
+            lock(&o).extend_from_slice(&d);
+            true
+        }))
+        .unwrap();
+
+        let mut seen = vec![];
+        let mut sent = false;
+        while start.elapsed() < Duration::from_secs(120) && !done(&seen.iter().map(|s: &(Status, u128)| s.0).collect::<Vec<_>>()) {
+            if let Ok(c) = rx.recv_timeout(Duration::from_millis(250)) {
+                eprintln!("{:>6} ms  -> {:?} via {:?}", start.elapsed().as_millis(), c.status, c.source);
+                seen.push((c.status, start.elapsed().as_millis()));
+            }
+            // Type once the input box is up (idle from a hook, or after a wait).
+            let ready = seen.iter().any(|s| s.0 == Status::Idle) || start.elapsed() > Duration::from_secs(10);
+            // Codex may ask to review the user's own changed hooks, which
+            // eats the prompt; skip it (Esc, saves no trust decision) and
+            // type the prompt again.
+            if seen.len() < 2 && String::from_utf8_lossy(&lock(&out)).contains("Review hooks") {
+                eprintln!("{:>6} ms  skipping Codex hook review", start.elapsed().as_millis());
+                lock(&out).clear();
+                pty.write(&id, b"\x1b").unwrap();
+                std::thread::sleep(Duration::from_millis(1000));
+                sent = false;
+            }
+            if !sent && ready {
+                std::thread::sleep(Duration::from_millis(1500));
+                pty.write(&id, prompt.as_bytes()).unwrap();
+                std::thread::sleep(Duration::from_millis(500));
+                pty.write(&id, b"\r").unwrap();
+                eprintln!("{:>6} ms  prompt sent", start.elapsed().as_millis());
+                sent = true;
+            }
+        }
+        let text = String::from_utf8_lossy(&lock(&out)).into_owned();
+        let tail: String = text.chars().rev().take(1500).collect::<Vec<_>>().into_iter().rev().collect();
+        eprintln!("--- last output ---\n{tail}\n---");
+        let _ = pty.write(&id, b"\x1b");
+        pty.kill(&id).unwrap();
+        seen
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn live_claude() {
+        let seen = live("claude", root().parent().unwrap(), &["--permission-mode", "default"], "Use the Write tool to create C:/Windows/Temp/spectacli-live-check.txt containing ok", |s| {
+            s.contains(&Status::Working) && (s.contains(&Status::NeedsInput) || s.ends_with(&[Status::Idle]))
+        });
+        let s: Vec<_> = seen.iter().map(|s| s.0).collect();
+        assert!(s.contains(&Status::Working), "{s:?}");
+        assert!(s.contains(&Status::NeedsInput) || s.ends_with(&[Status::Idle]), "{s:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore]
+    fn live_codex() {
+        // An empty folder, trusted for this launch only, so Codex skips its
+        // trust dialog without saving anything to the user's config.
+        let dir = std::env::temp_dir().join(format!("spectacli-live-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = dir.to_string_lossy().to_lowercase();
+        let trust = format!("projects.{}.trust_level=\"trusted\"", serde_json::Value::from(key));
+        let seen = live("codex", &dir, &["-c", &trust], "Reply with just the word OK. Do not run any commands.", |s| s.contains(&Status::Idle));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(seen.iter().any(|s| s.0 == Status::Idle), "{seen:?}");
+    }
+
     #[test]
     fn builds_codex_notify_as_toml() {
         let args = codex_args(Path::new(r"C:\Program Files\x.exe"), "spectacli-1-ab", "id1");
