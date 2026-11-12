@@ -37,10 +37,14 @@ param(
     [double] $Interval = 1,
     # Process names that start an agent subtree.
     [string] $Agents = '^(claude|codex|gemini|opencode|aider|node|bun)\.exe$',
-    [string] $OutDir = (Join-Path $PSScriptRoot "results")
+    # Default: bench/results next to this script.
+    [string] $OutDir = ""
 )
 
 $ErrorActionPreference = "Stop"
+# Not a param default: Windows PowerShell 5.1 leaves $PSScriptRoot empty
+# there when the script is started with `powershell -File`.
+if (-not $OutDir) { $OutDir = Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) "results" }
 
 function Get-Roots([hashtable] $byPid, [string] $root) {
     if ($root -match '^\d+$') {
