@@ -89,3 +89,12 @@ name = "Cursor Agent"
 commands = ["cursor-agent"]
 version_args = ["--version"]
 version_regex = '\d+\.\d+'
+
+# Google Antigravity's terminal CLI. The binary is `agy`.
+[[agent]]
+id = "antigravity"
+name = "Antigravity"
+commands = ["agy"]
+version_args = ["--version"]
+version_regex = '^\d+\.\d+\.\d+'
+continue_args = ["--continue"]
