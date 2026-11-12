@@ -4,8 +4,8 @@
   justify-content: space-between;
   height: 32px;
   padding-left: 12px;
-  background: var(--bg);
-  border-bottom: 1px solid #23262e;
+  background: #111114;
+  border-bottom: 1px solid #262629;
   user-select: none;
 }
 

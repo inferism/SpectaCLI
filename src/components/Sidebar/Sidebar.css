@@ -4,7 +4,8 @@
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  border-right: 1px solid #23262e;
+  background: #111114;
+  border-right: 1px solid #262629;
   font-size: 12px;
 }
 
@@ -28,7 +29,7 @@
 }
 
 .sidebar button:hover:not(:disabled) {
-  background: #23262e;
+  background: #262629;
 }
 
 .sidebar button:disabled {
@@ -49,7 +50,7 @@
 }
 
 .sb-list li.active {
-  background: #1b1e26;
+  background: #1d1d21;
 }
 
 .sb-list li.exited {
@@ -79,8 +80,8 @@
 
 .sb-picker input {
   margin-top: 4px;
-  background: #161920;
-  border: 1px solid #23262e;
+  background: #15151a;
+  border: 1px solid #262629;
   color: inherit;
   padding: 4px 6px;
   font: inherit;

@@ -43,8 +43,8 @@
   width: 300px;
   max-height: 360px;
   overflow-y: auto;
-  background: #161920;
-  border: 1px solid #2a2e38;
+  background: #15151a;
+  border: 1px solid #2e2e32;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   font-size: 12px;
 }
@@ -54,7 +54,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 6px 10px;
-  border-bottom: 1px solid #23262e;
+  border-bottom: 1px solid #262629;
   opacity: 0.8;
 }
 

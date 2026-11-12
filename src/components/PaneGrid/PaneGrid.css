@@ -81,7 +81,7 @@
 
 .layout-bar button.on {
   opacity: 1;
-  background: #23262e;
+  background: #262629;
 }
 
 .broadcast-bar {
@@ -90,7 +90,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px;
-  border-top: 1px solid #23262e;
+  border-top: 1px solid #262629;
   font-size: 12px;
 }
 
@@ -115,8 +115,8 @@
 .broadcast-row textarea {
   flex: 1;
   resize: none;
-  background: #161920;
-  border: 1px solid #23262e;
+  background: #15151a;
+  border: 1px solid #262629;
   color: inherit;
   padding: 4px 6px;
   font: inherit;
@@ -124,7 +124,7 @@
 
 .broadcast-row button {
   border: 0;
-  background: #23262e;
+  background: #262629;
   color: inherit;
   padding: 0 14px;
   cursor: pointer;

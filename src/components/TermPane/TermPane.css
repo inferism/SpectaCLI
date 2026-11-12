@@ -4,7 +4,7 @@
   min-width: 0;
   min-height: 0;
   height: 100%;
-  border: 1px solid #23262e;
+  border: 1px solid #262629;
 }
 
 .termpane-header {
@@ -13,7 +13,7 @@
   gap: 8px;
   height: 28px;
   padding: 0 6px 0 10px;
-  background: #161920;
+  background: #15151a;
   font-size: 12px;
   flex: none;
 }
@@ -22,7 +22,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #5c6370;
+  background: #77777a;
   flex: none;
 }
 
@@ -42,7 +42,7 @@
 
 .termpane-dot.is-exited {
   background: transparent;
-  border: 1px solid #5c6370;
+  border: 1px solid #77777a;
   box-sizing: border-box;
 }
 
@@ -74,14 +74,14 @@
 }
 
 .termpane-header button:hover {
-  background: #23262e;
+  background: #262629;
 }
 
 .termpane-term {
   flex: 1;
   min-height: 0;
   padding: 4px;
-  background: #0f1115;
+  background: #070708;
 }
 
 .termpane-stats {
@@ -109,11 +109,11 @@
 .termpane-auto:hover,
 .termpane-auto:focus-visible {
   opacity: 1;
-  background: #23262e;
+  background: #262629;
 }
 
 .termpane-auto option {
-  background: #161920;
+  background: #15151a;
 }
 
 button.termpane-resume {
@@ -121,7 +121,7 @@ button.termpane-resume {
   flex: 1;
   width: 100%;
   border: 0;
-  background: #0f1115;
+  background: #070708;
   color: inherit;
   font: inherit;
   cursor: pointer;
@@ -130,7 +130,7 @@ button.termpane-resume {
 button.termpane-resume:hover,
 button.termpane-resume:focus-visible {
   opacity: 1;
-  background: #161920;
+  background: #15151a;
 }
 
 .termpane-branch {

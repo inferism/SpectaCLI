@@ -139,7 +139,7 @@ function Xterm({ ptyId, hadFocus }: { ptyId: string; hadFocus: RefObject<boolean
       fontSize: 13,
       cursorBlink: true,
       scrollback: 5000,
-      theme: { background: "#0f1115", foreground: "#e6e8ee" },
+      theme: { background: "#070708", foreground: "#f1f1f2" },
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
