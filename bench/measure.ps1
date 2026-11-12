@@ -128,7 +128,12 @@ while ((Get-Date) -lt $deadline) {
     $tickStart = Get-Date
     $s = Measure-Once
     if ($null -eq $s) {
-        Write-Warning "No process matches '$Root'"
+        # Not started, or closed mid-run: stop instead of warning every second.
+        if ($rows.Count -eq 0) {
+            Write-Error "No process named '$Root' is running. Start the app first, or check its name in Task Manager > Details (without .exe)."
+        }
+        Write-Warning "'$Root' is no longer running; stopping early."
+        break
     } else {
         $row = [pscustomobject]@{
             seconds          = [math]::Round(((Get-Date) - $start).TotalSeconds, 1)
