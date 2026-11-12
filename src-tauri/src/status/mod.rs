@@ -4,12 +4,15 @@
 //! fires. Terminal signals and output heuristics feed the same `Tracker`.
 
 mod pipe;
+mod signals;
 
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use regex::Regex;
+use signals::{Parser, Signal};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -26,7 +29,13 @@ pub enum Status {
 #[serde(rename_all = "snake_case")]
 pub enum Source {
     Launch,
+    /// An injected CLI hook: accurate, and once an agent has reported one,
+    /// the weaker sources below are ignored for it.
     Hook,
+    /// BEL or an OSC notification/progress sequence in the output.
+    Terminal,
+    /// A guess: the prompt regex, user input, or a quiet spell after output.
+    Heuristic,
     Exit,
 }
 
@@ -47,10 +56,28 @@ fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Silence after output that makes a `working` agent without hooks `idle`.
+const QUIET: Duration = Duration::from_secs(3);
+/// Characters of recent output the prompt regex is matched against.
+const TAIL: usize = 400;
+/// Used for agents whose registry entry has no `prompt_regex`.
+pub const DEFAULT_PROMPT: &str = r"(?i)\(y/n\)|\[y/n\]|\(y\)es|do you want to |allow\?";
+
+struct Entry {
+    status: Status,
+    /// A hook reported for this agent: it is the only source we trust now.
+    hooked: bool,
+    parser: Parser,
+    /// Recent printable output, for `prompt`.
+    tail: String,
+    prompt: Option<Regex>,
+    last_output: Option<Instant>,
+}
+
 /// Current status per tracked agent. Only changes are emitted; events for
 /// agents that are unknown or already exited are dropped.
 pub struct Tracker {
-    agents: Mutex<HashMap<String, Status>>,
+    agents: Mutex<HashMap<String, Entry>>,
     emit: Emit,
 }
 
@@ -59,9 +86,18 @@ impl Tracker {
         Self { agents: Mutex::new(HashMap::new()), emit }
     }
 
-    /// Start tracking an agent that is about to launch.
-    pub fn start(&self, id: &str) {
-        lock(&self.agents).insert(id.into(), Status::Starting);
+    /// Start tracking an agent that is about to launch. `prompt` is the
+    /// regex for the output heuristic.
+    pub fn start(&self, id: &str, prompt: Option<Regex>) {
+        let entry = Entry {
+            status: Status::Starting,
+            hooked: false,
+            parser: Parser::default(),
+            tail: String::new(),
+            prompt,
+            last_output: None,
+        };
+        lock(&self.agents).insert(id.into(), entry);
         self.send(id, Status::Starting, Source::Launch);
     }
 
@@ -73,10 +109,16 @@ impl Tracker {
     pub fn set(&self, id: &str, status: Status, source: Source) {
         {
             let mut agents = lock(&self.agents);
-            match agents.get_mut(id) {
-                Some(s) if *s != status => *s = status,
-                _ => return,
+            let Some(e) = agents.get_mut(id) else { return };
+            if source == Source::Hook {
+                e.hooked = true;
+            } else if e.hooked {
+                return;
             }
+            if e.status == status {
+                return;
+            }
+            e.status = status;
         }
         self.send(id, status, source);
     }
@@ -85,6 +127,79 @@ impl Tracker {
     pub fn exited(&self, id: &str) {
         if lock(&self.agents).remove(id).is_some() {
             self.send(id, Status::Exited, Source::Exit);
+        }
+    }
+
+    /// Output bytes from the agent: terminal signals, then the prompt regex.
+    /// Does nothing for agents that report through hooks.
+    pub fn output(&self, id: &str, data: &[u8], now: Instant) {
+        let mut found = vec![];
+        let mut asked = false;
+        {
+            let mut agents = lock(&self.agents);
+            let Some(e) = agents.get_mut(id).filter(|e| !e.hooked) else { return };
+            e.last_output = Some(now);
+            let mut text = vec![];
+            e.parser.feed(data, &mut found, &mut text);
+            if let Some(re) = &e.prompt
+                && !text.is_empty()
+            {
+                e.tail.push_str(&String::from_utf8_lossy(&text));
+                let cut = e.tail.char_indices().rev().nth(TAIL).map_or(0, |(i, _)| i);
+                e.tail.drain(..cut);
+                if re.is_match(&e.tail) {
+                    e.tail.clear();
+                    asked = true;
+                }
+            }
+        }
+        // Not under the lock: `set` takes it again.
+        for s in found {
+            self.apply(id, s);
+        }
+        if asked {
+            self.set(id, Status::NeedsInput, Source::Heuristic);
+        }
+    }
+
+    fn apply(&self, id: &str, s: Signal) {
+        match s {
+            Signal::Attention => self.set(id, Status::NeedsInput, Source::Terminal),
+            Signal::Progress(true) => self.set(id, Status::Working, Source::Terminal),
+            Signal::Progress(false) => self.set(id, Status::Idle, Source::Terminal),
+        }
+    }
+
+    /// The user typed into the agent. Enter on an idle agent submits a
+    /// prompt, and on one that asked for input it answers; either way it is
+    /// working again. Does nothing for agents that report through hooks.
+    pub fn user_input(&self, id: &str, data: &[u8], now: Instant) {
+        if !data.contains(&b'\r') {
+            return;
+        }
+        let answered = {
+            let mut agents = lock(&self.agents);
+            let Some(e) = agents.get_mut(id).filter(|e| !e.hooked) else { return };
+            e.tail.clear();
+            e.last_output = Some(now);
+            matches!(e.status, Status::Idle | Status::NeedsInput)
+        };
+        if answered {
+            self.set(id, Status::Working, Source::Heuristic);
+        }
+    }
+
+    /// Call every few hundred ms: agents without hooks that went quiet
+    /// after output are idle.
+    pub fn tick(&self, now: Instant) {
+        let quiet: Vec<String> = lock(&self.agents)
+            .iter()
+            .filter(|(_, e)| !e.hooked && matches!(e.status, Status::Starting | Status::Working))
+            .filter(|(_, e)| e.last_output.is_some_and(|t| now.saturating_duration_since(t) >= QUIET))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in quiet {
+            self.set(&id, Status::Idle, Source::Heuristic);
         }
     }
 
@@ -230,6 +345,13 @@ impl StatusHub {
     /// either, agents still run; they just get no hook status.
     pub fn start(emit: Emit) -> Self {
         let tracker = Arc::new(Tracker::new(emit));
+        let ticker = tracker.clone();
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                ticker.tick(Instant::now());
+            }
+        });
         let helper = std::env::current_exe().ok().map(|e| e.with_file_name("spectacli-notify.exe"));
         let hooks = match helper.filter(|h| h.is_file()) {
             None => {
@@ -255,16 +377,18 @@ impl StatusHub {
         Self { tracker, hooks }
     }
 
-    /// Launch args for `hook_kind` and start tracking `agent_id`. Agents
-    /// without a hook are not tracked (no source would ever update them).
-    pub fn prepare(&self, agent_id: &str, hook_kind: Option<&str>) -> Vec<String> {
+    /// Launch args for `hook_kind`, and start tracking `agent_id`. Agents
+    /// without a hook are tracked too: terminal signals and the `prompt`
+    /// regex (default `DEFAULT_PROMPT`) are their only sources.
+    pub fn prepare(&self, agent_id: &str, hook_kind: Option<&str>, prompt: Option<&str>) -> Vec<String> {
         let args = match (&self.hooks, hook_kind) {
             (Some(h), Some(kind)) => h.args(kind, agent_id),
             _ => vec![],
         };
-        if !args.is_empty() {
-            self.tracker.start(agent_id);
-        }
+        let prompt = Regex::new(prompt.unwrap_or(DEFAULT_PROMPT))
+            .map_err(|e| eprintln!("status: bad prompt regex for {agent_id}: {e}"))
+            .ok();
+        self.tracker.start(agent_id, prompt);
         args
     }
 }
@@ -285,7 +409,7 @@ mod tests {
     fn emits_changes_only_for_live_agents() {
         let (t, log) = tracker();
         t.set("a", Status::Working, Source::Hook); // unknown: dropped
-        t.start("a");
+        t.start("a", None);
         t.set("a", Status::Working, Source::Hook);
         t.set("a", Status::Working, Source::Hook); // unchanged: dropped
         t.set("a", Status::Idle, Source::Hook);
@@ -301,6 +425,57 @@ mod tests {
                 (Status::Exited, Source::Exit)
             ]
         );
+    }
+
+    fn quiet_tracker(prompt: Option<&str>) -> (Tracker, Log) {
+        let (t, log) = tracker();
+        t.start("a", prompt.map(|p| Regex::new(p).unwrap()));
+        (t, log)
+    }
+
+    #[test]
+    fn terminal_signals_set_status_until_a_hook_reports() {
+        let (t, log) = quiet_tracker(None);
+        let now = Instant::now();
+        t.output("a", b"]9;4;3;", now);
+        t.output("a", b"", now);
+        t.set("a", Status::Idle, Source::Hook);
+        t.output("a", b"", now); // ignored: hooks own this agent now
+        t.tick(now + Duration::from_secs(60));
+        assert_eq!(
+            *lock(&log),
+            [
+                (Status::Starting, Source::Launch),
+                (Status::Working, Source::Terminal),
+                (Status::NeedsInput, Source::Terminal),
+                (Status::Idle, Source::Hook)
+            ]
+        );
+    }
+
+    #[test]
+    fn prompt_regex_matches_across_chunks_and_ignores_escapes() {
+        let (t, log) = quiet_tracker(Some(r"\(y/n\)"));
+        let now = Instant::now();
+        t.output("a", b"[1mApply?[0m (y", now);
+        assert_eq!(lock(&log).len(), 1);
+        t.output("a", b"/n)", now);
+        assert_eq!(lock(&log).last(), Some(&(Status::NeedsInput, Source::Heuristic)));
+    }
+
+    #[test]
+    fn enter_means_working_and_quiet_means_idle() {
+        let (t, log) = quiet_tracker(None);
+        let t0 = Instant::now();
+        t.output("a", b"banner", t0);
+        t.tick(t0 + Duration::from_secs(1)); // still within the quiet window
+        t.tick(t0 + QUIET);
+        t.user_input("a", b"hello", t0 + QUIET); // no Enter yet
+        t.user_input("a", b"\r", t0 + QUIET);
+        t.tick(t0 + QUIET * 2); // Enter reset the quiet clock
+        t.tick(t0 + QUIET * 2 + QUIET);
+        let states: Vec<_> = lock(&log).iter().map(|s| s.0).collect();
+        assert_eq!(states, [Status::Starting, Status::Idle, Status::Working, Status::Idle]);
     }
 
     #[test]
@@ -378,7 +553,7 @@ mod tests {
         let mut args = hooks.args(&det.def.hook.as_ref().unwrap().kind, &id);
         args.extend(extra.iter().map(|a| a.to_string()));
         assert!(!args.is_empty());
-        tracker.start(&id);
+        tracker.start(&id, None);
         let pty = PtyManager::new(Arc::new(|_, _| {}));
         let out = Arc::new(Mutex::new(Vec::new()));
         let o = out.clone();

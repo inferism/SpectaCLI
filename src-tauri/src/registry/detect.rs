@@ -418,6 +418,7 @@ mod tests {
             resume_args: vec![],
             continue_args: vec![],
             hook: None,
+            prompt_regex: None,
             config_dir_env: None,
             image_paste: None,
             submit: "\r".into(),

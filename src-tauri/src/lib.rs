@@ -10,7 +10,7 @@ use registry::{DetectedAgent, LaunchKind, LaunchSpec};
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::ipc::{Channel, InvokeResponseBody, Response};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -104,7 +104,7 @@ async fn spawn_agent(
                     .ok_or_else(|| format!("agent `{agent_def_id}` is not installed"))?;
                 name = agent.def.name.clone();
                 // Tracking starts before launch so an early hook isn't lost.
-                let args = status.prepare(&id, agent.def.hook.as_ref().map(|h| h.kind.as_str()));
+                let args = status.prepare(&id, agent.def.hook.as_ref().map(|h| h.kind.as_str()), agent.def.prompt_regex.as_deref());
                 app.state::<PtyManager>().spawn(SpawnRequest {
                     id: Some(id.clone()),
                     launch: agent.launch,
@@ -178,7 +178,13 @@ async fn detach_agent(pty: State<'_, PtyManager>, agent_id: String, attach_id: u
 }
 
 #[tauri::command]
-async fn write(pty: State<'_, PtyManager>, agent_id: String, data: String) -> Result<(), String> {
+async fn write(
+    pty: State<'_, PtyManager>,
+    status: State<'_, StatusHub>,
+    agent_id: String,
+    data: String,
+) -> Result<(), String> {
+    status.tracker.user_input(&agent_id, data.as_bytes(), Instant::now());
     pty.write(&agent_id, data.as_bytes())
 }
 
@@ -234,12 +240,15 @@ pub fn run() {
                 let _ = handle.emit("agent:status", change);
             }));
             let tracker = hub.tracker.clone();
+            let observed = hub.tracker.clone();
             app.manage(hub);
             let handle = app.handle().clone();
-            app.manage(PtyManager::new(Arc::new(move |id, code| {
+            let pty = PtyManager::new(Arc::new(move |id, code| {
                 tracker.exited(id);
                 let _ = handle.emit("agent:exit", AgentExit { agent_id: id.into(), code });
-            })));
+            }))
+            .with_observer(Arc::new(move |id, data| observed.output(id, data, Instant::now())));
+            app.manage(pty);
             stats::spawn(app.handle().clone());
             // Detect in the background at startup so the cache is warm before
             // the picker opens; the UI never waits on this.

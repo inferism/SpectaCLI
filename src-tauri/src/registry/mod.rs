@@ -33,6 +33,10 @@ pub struct AgentDef {
     pub continue_args: Vec<String>,
     #[serde(default)]
     pub hook: Option<HookSpec>,
+    /// Output that means the CLI is asking the user something (the weak
+    /// status source for CLIs without hooks). A built-in default applies when unset.
+    #[serde(default)]
+    pub prompt_regex: Option<String>,
     #[serde(default)]
     pub config_dir_env: Option<String>,
     #[serde(default)]
@@ -112,6 +116,9 @@ fn into_def(mut t: toml::Table) -> Result<AgentDef, String> {
     }
     if let Some(re) = &def.version_regex {
         regex::Regex::new(re).map_err(|e| format!("agent `{id}`: bad version_regex: {e}"))?;
+    }
+    if let Some(re) = &def.prompt_regex {
+        regex::Regex::new(re).map_err(|e| format!("agent `{id}`: bad prompt_regex: {e}"))?;
     }
     Ok(def)
 }

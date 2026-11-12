@@ -48,9 +48,14 @@ struct Agent {
     job: Option<Arc<Job>>,
 }
 
+/// Sees every chunk of an agent's output as it is read: `(agent_id, bytes)`.
+/// Runs on the reader thread, so it must be quick.
+pub type OutputObserver = Arc<dyn Fn(&str, &[u8]) + Send + Sync>;
+
 pub struct PtyManager {
     agents: Mutex<HashMap<String, Arc<Agent>>>,
     on_exit: ExitHook,
+    observer: Option<OutputObserver>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -86,7 +91,12 @@ fn build_command(req: &SpawnRequest) -> CommandBuilder {
 
 impl PtyManager {
     pub fn new(on_exit: ExitHook) -> Self {
-        Self { agents: Mutex::new(HashMap::new()), on_exit }
+        Self { agents: Mutex::new(HashMap::new()), on_exit, observer: None }
+    }
+
+    pub fn with_observer(mut self, observer: OutputObserver) -> Self {
+        self.observer = Some(observer);
+        self
     }
 
     fn get(&self, id: &str) -> Result<Arc<Agent>, String> {
@@ -147,6 +157,8 @@ impl PtyManager {
         // blocks on a full pipe.
         let out = output.clone();
         let replier = agent.clone();
+        let observer = self.observer.clone();
+        let observed_id = id.clone();
         let reader_t = std::thread::Builder::new()
             .name(format!("pty-read-{id}"))
             .spawn(move || {
@@ -165,6 +177,9 @@ impl PtyManager {
                         let mut w = lock(&replier.writer);
                         let _ = w.write_all(b"\x1b[1;1R").and_then(|_| w.flush());
                         data = rest;
+                    }
+                    if let Some(o) = &observer {
+                        o(&observed_id, data);
                     }
                     out.push(data);
                 }

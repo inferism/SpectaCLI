@@ -10,6 +10,8 @@
 #   new_session_args, resume_args, continue_args
 #                      session templates; {session_uuid} is substituted
 #   hook               status hook kind (see PLAN.md feature 4)
+#   prompt_regex       output that means the CLI asks the user something; the
+#                      fallback status source for CLIs without a hook
 #   config_dir_env     env var that points the CLI at a profile directory
 #   image_paste        "path" or "native"
 #   submit             bytes sent to submit a prompt (default "\r")
@@ -44,6 +46,7 @@ name = "Gemini CLI"
 commands = ["gemini"]
 version_args = ["--version"]
 version_regex = '\d+\.\d+\.\d+'
+prompt_regex = '(?i)allow execution|do you want to |apply this change\?'
 
 [[agent]]
 id = "opencode"
@@ -58,6 +61,7 @@ name = "Aider"
 commands = ["aider"]
 version_args = ["--version"]
 version_regex = '(?i)aider'
+prompt_regex = '(?i)\(y\)es/\(n\)o|\(y/n\)|\[y/n\]'
 
 # VS Code puts a `copilot` shim on PATH that is not the Copilot CLI. It exits
 # non-zero with a "not found" message, so the probe rejects it.
