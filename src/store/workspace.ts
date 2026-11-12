@@ -1,86 +1,265 @@
 import { create } from "zustand";
 import { killAgent, spawnAgent, spawnCustom } from "../lib/ipc";
 
-export interface Project {
+// --- Persisted shape (projects.json, PLAN.md section 4) ---
+// Objects are only ever updated by spreading, so fields written by a newer
+// version of the app survive a load/save round trip.
+
+export type AgentLaunch = { kind: "def"; agentDefId: string } | { kind: "custom"; command: string };
+
+export interface AgentInstance {
+  /** Stable across restarts. Not the PTY id, which changes every launch. */
   id: string;
-  path: string;
+  launch: AgentLaunch;
   name: string;
+  cwd: string;
 }
 
-export interface PaneAgent {
-  /** PTY id from the backend. */
+export interface Layout {
+  maximizedAgentId: string | null;
+}
+
+/** Phase 3 adds more; until then every project has exactly one. */
+export interface Conversation {
   id: string;
-  projectId: string;
+  title: string;
+  createdAt: string;
+  /** Array order is pane order. */
+  agents: AgentInstance[];
+  layout: Layout;
+}
+
+export interface Project {
+  id: string;
   name: string;
+  path: string;
+  createdAt: string;
+  lastOpenedAt: string;
+  conversations: Conversation[];
+  activeConversationId: string;
+}
+
+export interface ProjectsFile {
+  schemaVersion: 1;
+  activeProjectId: string | null;
+  projects: Project[];
+}
+
+// --- Runtime only (never saved) ---
+
+export interface AgentRuntime {
+  /** null until launched in this app session. */
+  ptyId: string | null;
   exited: boolean;
 }
 
+export type LaunchWhat = { defId: string; name: string } | { command: string };
+
 interface WorkspaceState {
+  /** False until `hydrate` ran; nothing may be saved before that. */
+  hydrated: boolean;
+  /** Top-level fields of the loaded file this version doesn't know. */
+  fileExtra: Record<string, unknown>;
   projects: Project[];
   activeProjectId: string | null;
-  agents: PaneAgent[];
-  maximizedId: string | null;
+  runtime: Record<string, AgentRuntime>;
 
+  hydrate: (file: ProjectsFile | null) => void;
   addProject: (path: string) => void;
   selectProject: (id: string) => void;
   removeProject: (id: string) => void;
-  /** Start a detected CLI (`{ defId }`) or a typed command (`{ command }`) in the active project. */
-  launch: (what: { defId: string; name: string } | { command: string }) => Promise<void>;
-  closeAgent: (id: string) => void;
-  markExited: (id: string) => void;
-  toggleMaximize: (id: string) => void;
+  /** Start an agent in `projectId`. Resolves to the new instance id, or null if the project went away meanwhile. */
+  launch: (projectId: string, what: LaunchWhat) => Promise<string | null>;
+  closeAgent: (instanceId: string) => void;
+  /** From `agent:exit`, which reports the PTY id. */
+  markExited: (ptyId: string) => void;
+  toggleMaximize: (projectId: string, instanceId: string) => void;
 }
 
+const now = () => new Date().toISOString();
 const baseName = (p: string) => p.split(/[\\/]/).filter(Boolean).pop() ?? p;
+/** Windows paths: case-insensitive, either slash, no trailing slash. */
+const samePath = (a: string, b: string) => {
+  const norm = (p: string) => p.replace(/\//g, "\\").replace(/\\+$/, "").toLowerCase();
+  return norm(a) === norm(b);
+};
+
+export const activeConversation = (p: Project): Conversation =>
+  p.conversations.find((c) => c.id === p.activeConversationId) ?? p.conversations[0];
+
+function newConversation(): Conversation {
+  return { id: crypto.randomUUID(), title: "Default", createdAt: now(), agents: [], layout: { maximizedAgentId: null } };
+}
+
+/** Repair what a hand-edited or partial file might lack. */
+function normalizeProject(p: Project): Project {
+  const conversations = p.conversations?.length ? p.conversations : [newConversation()];
+  const activeConversationId = conversations.some((c) => c.id === p.activeConversationId)
+    ? p.activeConversationId
+    : conversations[0].id;
+  return {
+    ...p,
+    name: p.name ?? baseName(p.path),
+    conversations: conversations.map((c) => ({
+      ...c,
+      agents: c.agents ?? [],
+      layout: { ...c.layout, maximizedAgentId: c.layout?.maximizedAgentId ?? null },
+    })),
+    activeConversationId,
+  };
+}
+
+function updateConversation(projects: Project[], projectId: string, fn: (c: Conversation) => Conversation): Project[] {
+  return projects.map((p) =>
+    p.id !== projectId
+      ? p
+      : { ...p, conversations: p.conversations.map((c) => (c.id === p.activeConversationId ? fn(c) : c)) },
+  );
+}
+
+const projectOf = (projects: Project[], instanceId: string) =>
+  projects.find((p) => p.conversations.some((c) => c.agents.some((a) => a.id === instanceId)));
+
+/** PTYs that exited before `launch` recorded them (a command that fails at once). */
+const earlyExits = new Set<string>();
+/** Only while a launch is in flight can an unknown exit be an early one. */
+let launching = 0;
+
+export function toFile(s: Pick<WorkspaceState, "fileExtra" | "projects" | "activeProjectId">): ProjectsFile {
+  return { ...s.fileExtra, schemaVersion: 1, activeProjectId: s.activeProjectId, projects: s.projects };
+}
 
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
+  hydrated: false,
+  fileExtra: {},
   projects: [],
   activeProjectId: null,
-  agents: [],
-  maximizedId: null,
+  runtime: {},
 
-  addProject: (path) => {
-    const existing = get().projects.find((p) => p.path.toLowerCase() === path.toLowerCase());
-    if (existing) return set({ activeProjectId: existing.id, maximizedId: null });
-    const project = { id: crypto.randomUUID(), path, name: baseName(path) };
-    set((s) => ({ projects: [...s.projects, project], activeProjectId: project.id, maximizedId: null }));
+  hydrate: (file) => {
+    if (!file) return set({ hydrated: true });
+    const { schemaVersion: _v, activeProjectId, projects, ...fileExtra } = file;
+    const ps = (projects ?? []).map(normalizeProject);
+    set({
+      hydrated: true,
+      fileExtra,
+      projects: ps,
+      activeProjectId: ps.some((p) => p.id === activeProjectId) ? activeProjectId : (ps[0]?.id ?? null),
+    });
   },
 
-  selectProject: (id) => set({ activeProjectId: id, maximizedId: null }),
+  addProject: (path) => {
+    const existing = get().projects.find((p) => samePath(p.path, path));
+    if (existing) return get().selectProject(existing.id);
+    const conv = newConversation();
+    const project: Project = {
+      id: crypto.randomUUID(),
+      name: baseName(path),
+      path,
+      createdAt: now(),
+      lastOpenedAt: now(),
+      conversations: [conv],
+      activeConversationId: conv.id,
+    };
+    set((s) => ({ projects: [...s.projects, project], activeProjectId: project.id }));
+  },
+
+  selectProject: (id) =>
+    set((s) => ({
+      activeProjectId: id,
+      projects: s.projects.map((p) => (p.id === id ? { ...p, lastOpenedAt: now() } : p)),
+    })),
 
   removeProject: (id) => {
-    get().agents.filter((a) => a.projectId === id).forEach((a) => void killAgent(a.id).catch(() => {}));
+    const project = get().projects.find((p) => p.id === id);
+    if (!project) return;
+    const ids = project.conversations.flatMap((c) => c.agents.map((a) => a.id));
+    for (const i of ids) {
+      const pty = get().runtime[i]?.ptyId;
+      if (pty) void killAgent(pty).catch(() => {});
+    }
     set((s) => {
       const projects = s.projects.filter((p) => p.id !== id);
+      const runtime = { ...s.runtime };
+      ids.forEach((i) => delete runtime[i]);
       return {
         projects,
-        agents: s.agents.filter((a) => a.projectId !== id),
+        runtime,
         activeProjectId: s.activeProjectId === id ? (projects[0]?.id ?? null) : s.activeProjectId,
-        maximizedId: null,
       };
     });
   },
 
-  launch: async (what) => {
-    const project = get().projects.find((p) => p.id === get().activeProjectId);
-    if (!project) return;
-    const id =
-      "defId" in what
-        ? await spawnAgent(what.defId, project.path, 80, 24)
-        : await spawnCustom(what.command, project.path, 80, 24);
-    const name = "defId" in what ? what.name : what.command;
-    set((s) => ({ agents: [...s.agents, { id, projectId: project.id, name, exited: false }] }));
-  },
-
-  closeAgent: (id) => {
-    void killAgent(id).catch(() => {});
+  launch: async (projectId, what) => {
+    const project = get().projects.find((p) => p.id === projectId);
+    if (!project) return null;
+    let ptyId: string;
+    launching++;
+    try {
+      ptyId =
+        "defId" in what
+          ? await spawnAgent(what.defId, project.path, 80, 24)
+          : await spawnCustom(what.command, project.path, 80, 24);
+    } finally {
+      launching--;
+    }
+    // The project may have been removed while the process was starting.
+    if (!get().projects.some((p) => p.id === projectId)) {
+      earlyExits.delete(ptyId);
+      void killAgent(ptyId).catch(() => {});
+      return null;
+    }
+    const instance: AgentInstance = {
+      id: crypto.randomUUID(),
+      launch: "defId" in what ? { kind: "def", agentDefId: what.defId } : { kind: "custom", command: what.command },
+      name: "defId" in what ? what.name : what.command,
+      cwd: project.path,
+    };
+    const exited = earlyExits.delete(ptyId);
     set((s) => ({
-      agents: s.agents.filter((a) => a.id !== id),
-      maximizedId: s.maximizedId === id ? null : s.maximizedId,
+      projects: updateConversation(s.projects, projectId, (c) => ({ ...c, agents: [...c.agents, instance] })),
+      runtime: { ...s.runtime, [instance.id]: { ptyId, exited } },
     }));
+    return instance.id;
   },
 
-  markExited: (id) => set((s) => ({ agents: s.agents.map((a) => (a.id === id ? { ...a, exited: true } : a)) })),
+  closeAgent: (instanceId) => {
+    const pty = get().runtime[instanceId]?.ptyId;
+    if (pty) void killAgent(pty).catch(() => {});
+    const project = projectOf(get().projects, instanceId);
+    set((s) => {
+      const runtime = { ...s.runtime };
+      delete runtime[instanceId];
+      return {
+        runtime,
+        projects: project
+          ? updateConversation(s.projects, project.id, (c) => ({
+              ...c,
+              agents: c.agents.filter((a) => a.id !== instanceId),
+              layout: {
+                ...c.layout,
+                maximizedAgentId: c.layout.maximizedAgentId === instanceId ? null : c.layout.maximizedAgentId,
+              },
+            }))
+          : s.projects,
+      };
+    });
+  },
 
-  toggleMaximize: (id) => set((s) => ({ maximizedId: s.maximizedId === id ? null : id })),
+  markExited: (ptyId) => {
+    const entry = Object.entries(get().runtime).find(([, r]) => r.ptyId === ptyId);
+    if (!entry) {
+      if (launching > 0) earlyExits.add(ptyId);
+      return;
+    }
+    set((s) => ({ runtime: { ...s.runtime, [entry[0]]: { ...entry[1], exited: true } } }));
+  },
+
+  toggleMaximize: (projectId, instanceId) =>
+    set((s) => ({
+      projects: updateConversation(s.projects, projectId, (c) => ({
+        ...c,
+        layout: { ...c.layout, maximizedAgentId: c.layout.maximizedAgentId === instanceId ? null : instanceId },
+      })),
+    })),
 }));

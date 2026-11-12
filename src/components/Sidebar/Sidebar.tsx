@@ -1,11 +1,11 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEffect, useState } from "react";
 import { type DetectedAgent, detectAgents, onRegistryChanged } from "../../lib/ipc";
-import { useWorkspace } from "../../store/workspace";
+import { activeConversation, type LaunchWhat, useWorkspace } from "../../store/workspace";
 import "./Sidebar.css";
 
 export default function Sidebar() {
-  const { projects, activeProjectId, agents, addProject, selectProject, removeProject, launch, closeAgent } =
+  const { projects, activeProjectId, runtime, addProject, selectProject, removeProject, launch, closeAgent } =
     useWorkspace();
   const [detected, setDetected] = useState<DetectedAgent[]>([]);
   const [picker, setPicker] = useState(false);
@@ -23,18 +23,20 @@ export default function Sidebar() {
     if (typeof dir === "string") addProject(dir);
   };
 
-  const start = async (what: Parameters<typeof launch>[0]) => {
+  const start = async (what: LaunchWhat) => {
+    if (!activeProjectId) return;
     setPicker(false);
     setCustom("");
     setError(null);
     try {
-      await launch(what);
+      await launch(activeProjectId, what);
     } catch (e) {
       setError(String(e));
     }
   };
 
-  const mine = agents.filter((a) => a.projectId === activeProjectId);
+  const active = projects.find((p) => p.id === activeProjectId);
+  const mine = active ? activeConversation(active).agents : [];
 
   return (
     <aside className="sidebar">
@@ -77,7 +79,7 @@ export default function Sidebar() {
       {error && <div className="sb-error">{error}</div>}
       <ul className="sb-list">
         {mine.map((a) => (
-          <li key={a.id} className={a.exited ? "exited" : ""}>
+          <li key={a.id} className={runtime[a.id]?.ptyId && !runtime[a.id].exited ? "" : "exited"}>
             <span className="sb-main">{a.name}</span>
             <button aria-label={`Close ${a.name}`} onClick={() => closeAgent(a.id)}>×</button>
           </li>

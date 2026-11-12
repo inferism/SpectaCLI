@@ -1,44 +1,80 @@
-import { useWorkspace } from "../../store/workspace";
+import { activeConversation, type Project, useWorkspace } from "../../store/workspace";
 import TermPane from "../TermPane/TermPane";
 import { gridDims } from "./gridDims";
 import "./PaneGrid.css";
 
+/**
+ * One grid per project, all mounted: switching projects hides a grid instead
+ * of unmounting it, so terminals keep their screen and scrollback.
+ */
 export default function PaneGrid() {
-  const { agents, activeProjectId, maximizedId, toggleMaximize } = useWorkspace();
-  const shown = agents.filter((a) => a.projectId === activeProjectId);
-  const { cols, rows } = gridDims(shown.length);
-  const maximized = shown.some((a) => a.id === maximizedId) ? maximizedId : null;
+  const projects = useWorkspace((s) => s.projects);
+  const activeProjectId = useWorkspace((s) => s.activeProjectId);
+  const runtime = useWorkspace((s) => s.runtime);
 
-  if (shown.length === 0) {
-    return (
-      <div className="grid-empty">
-        {activeProjectId ? "Add an agent with + in the sidebar." : "Add a project folder to start."}
-      </div>
-    );
-  }
+  const active = projects.find((p) => p.id === activeProjectId);
+  const hasRunning = (p: Project) => activeConversation(p).agents.some((a) => runtime[a.id]?.ptyId);
+  const mounted = projects.filter((p) => p.id === activeProjectId || hasRunning(p));
 
+  return (
+    <>
+      {mounted.map((p) => (
+        <ProjectGrid key={p.id} project={p} visible={p.id === activeProjectId} />
+      ))}
+      {(!active || activeConversation(active).agents.length === 0) && (
+        <div className="grid-empty">{active ? "Add an agent with + in the sidebar." : "Add a project folder to start."}</div>
+      )}
+    </>
+  );
+}
+
+function ProjectGrid({ project, visible }: { project: Project; visible: boolean }) {
+  const runtime = useWorkspace((s) => s.runtime);
+  const toggleMaximize = useWorkspace((s) => s.toggleMaximize);
+  const conv = activeConversation(project);
+  const agents = conv.agents;
+  if (agents.length === 0) return null;
+
+  const { cols, rows } = gridDims(agents.length);
+  const maximized = agents.some((a) => a.id === conv.layout.maximizedAgentId) ? conv.layout.maximizedAgentId : null;
   // Past 3x3 the rows stay at a third of the viewport and the grid scrolls.
   const rowSize = `calc(100% / ${Math.min(rows, 3)})`;
+
   return (
     <div
       className="grid"
-      style={
-        maximized
+      style={{
+        ...(maximized
           ? { gridTemplateColumns: "1fr", gridAutoRows: "100%" }
-          : { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: rowSize }
-      }
+          : { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: rowSize }),
+        ...(visible ? {} : { display: "none" }),
+      }}
     >
-      {shown.map((a) => (
-        // Hidden panes stay mounted so their terminals keep state.
-        <div key={a.id} className="grid-cell" style={maximized && maximized !== a.id ? { display: "none" } : undefined}>
-          <TermPane
-            agentId={a.id}
-            name={a.exited ? `${a.name} (exited)` : a.name}
-            maximized={maximized === a.id}
-            onToggleMaximize={() => toggleMaximize(a.id)}
-          />
-        </div>
-      ))}
+      {agents.map((a) => {
+        const rt = runtime[a.id];
+        const shown = !maximized || maximized === a.id;
+        const name = rt?.exited ? `${a.name} (exited)` : a.name;
+        return (
+          <div key={a.id} className="grid-cell" style={shown ? undefined : { display: "none" }}>
+            {rt?.ptyId ? (
+              <TermPane
+                ptyId={rt.ptyId}
+                visible={visible && shown}
+                name={name}
+                maximized={maximized === a.id}
+                onToggleMaximize={() => toggleMaximize(project.id, a.id)}
+              />
+            ) : (
+              <section className="termpane">
+                <header className="termpane-header">
+                  <span className="termpane-name">{a.name}</span>
+                </header>
+                <div className="grid-empty">Not running</div>
+              </section>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
