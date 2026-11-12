@@ -257,7 +257,7 @@ Estimates assume a few focused hours a day with an AI assistant. They are calend
 5. **(done)** Auto grid: 1 = full, 2 = 1×2, 3 to 4 = 2×2, 5 to 6 = 3×2, 7 and up = 3×3 with a scroll; maximize/restore per pane.
 6. **(done)** Sidebar: projects (add folder, select, remove), active agents list, the + picker with detected CLIs and a custom command.
 7. **(done)** Per-project agents: switching hides and shows panes instead of restarting them. Persist `projects.json`.
-8. Restore on restart: the last project's agents relaunch, without resume yet.
+8. **(done)** Restore on restart: the last project's agents relaunch, without resume yet.
 - **Done when**: you can run Claude, Codex, and a custom command in two projects at once; switching projects keeps sessions alive; closing a pane leaves no orphan processes (check in Task Manager); the window drags, snaps, and resizes cleanly; and the installer is under 10 MB.
 
 ### Phase 2: resources and status (5 to 7 days)

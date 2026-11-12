@@ -71,6 +71,8 @@ interface WorkspaceState {
   /** Start an agent in `projectId`. Resolves to the new instance id, or null if the project went away meanwhile. */
   launch: (projectId: string, what: LaunchWhat) => Promise<string | null>;
   closeAgent: (instanceId: string) => void;
+  /** Relaunch the saved agents of a project that have no process yet (once per app session each). */
+  restoreProject: (projectId: string) => Promise<void>;
   /** From `agent:exit`, which reports the PTY id. */
   markExited: (ptyId: string) => void;
   toggleMaximize: (projectId: string, instanceId: string) => void;
@@ -124,6 +126,8 @@ const projectOf = (projects: Project[], instanceId: string) =>
 const earlyExits = new Set<string>();
 /** Only while a launch is in flight can an unknown exit be an early one. */
 let launching = 0;
+/** Saved agents already tried this session, so a failing one is not retried in a loop. */
+const restoreTried = new Set<string>();
 
 export function toFile(s: Pick<WorkspaceState, "fileExtra" | "projects" | "activeProjectId">): ProjectsFile {
   return { ...s.fileExtra, schemaVersion: 1, activeProjectId: s.activeProjectId, projects: s.projects };
@@ -140,12 +144,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (!file) return set({ hydrated: true });
     const { schemaVersion: _v, activeProjectId, projects, ...fileExtra } = file;
     const ps = (projects ?? []).map(normalizeProject);
-    set({
-      hydrated: true,
-      fileExtra,
-      projects: ps,
-      activeProjectId: ps.some((p) => p.id === activeProjectId) ? activeProjectId : (ps[0]?.id ?? null),
-    });
+    const active = ps.some((p) => p.id === activeProjectId) ? activeProjectId : (ps[0]?.id ?? null);
+    set({ hydrated: true, fileExtra, projects: ps, activeProjectId: active });
+    // Only the last project wakes up; the others stay hibernated until selected.
+    if (active) void get().restoreProject(active);
   },
 
   addProject: (path) => {
@@ -164,11 +166,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     set((s) => ({ projects: [...s.projects, project], activeProjectId: project.id }));
   },
 
-  selectProject: (id) =>
+  selectProject: (id) => {
     set((s) => ({
       activeProjectId: id,
       projects: s.projects.map((p) => (p.id === id ? { ...p, lastOpenedAt: now() } : p)),
-    })),
+    }));
+    void get().restoreProject(id);
+  },
 
   removeProject: (id) => {
     const project = get().projects.find((p) => p.id === id);
@@ -221,6 +225,38 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       runtime: { ...s.runtime, [instance.id]: { ptyId, exited } },
     }));
     return instance.id;
+  },
+
+  restoreProject: async (projectId) => {
+    const project = get().projects.find((p) => p.id === projectId);
+    if (!project) return;
+    const todo = activeConversation(project).agents.filter((a) => !get().runtime[a.id] && !restoreTried.has(a.id));
+    await Promise.all(
+      todo.map(async (a) => {
+        restoreTried.add(a.id);
+        let ptyId: string;
+        launching++;
+        try {
+          ptyId =
+            a.launch.kind === "def"
+              ? await spawnAgent(a.launch.agentDefId, a.cwd, 80, 24)
+              : await spawnCustom(a.launch.command, a.cwd, 80, 24);
+        } catch (e) {
+          console.error(`restore ${a.name}:`, e);
+          return;
+        } finally {
+          launching--;
+        }
+        // Closed or removed while starting.
+        if (!projectOf(get().projects, a.id)) {
+          earlyExits.delete(ptyId);
+          void killAgent(ptyId).catch(() => {});
+          return;
+        }
+        const exited = earlyExits.delete(ptyId);
+        set((s) => ({ runtime: { ...s.runtime, [a.id]: { ptyId, exited } } }));
+      }),
+    );
   },
 
   closeAgent: (instanceId) => {
