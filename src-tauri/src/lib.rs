@@ -1,3 +1,4 @@
+mod panic_log;
 mod pty;
 mod registry;
 mod session;
@@ -338,6 +339,9 @@ pub fn run() {
         .manage(Detected::default())
         .manage(StoreLock::default())
         .setup(|app| {
+            if let Ok(dir) = app.path().app_config_dir() {
+                panic_log::install(dir.join("logs"));
+            }
             let handle = app.handle().clone();
             let hub = StatusHub::start(Arc::new(move |change| {
                 let _ = handle.emit("agent:status", change);
