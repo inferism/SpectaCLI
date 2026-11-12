@@ -285,9 +285,9 @@ Estimates assume a few focused hours a day with an AI assistant. They are calend
 
 ### Phase 6: release (3 to 4 days, plus waiting time for signing)
 - `tauri-action` GitHub workflow builds the NSIS `.exe` (primary: per-user install, no admin) plus `.msi` (for managed environments) on tag push and uploads them to a **draft** GitHub Release.
-- Updater plugin: generate the updater key pair (this is separate from code signing; keep the private key in GitHub secrets and a password manager), publish `latest.json` with the release, and check on startup plus every 6 h. Updates are opt-in by default: show "Update available".
+- ~~Updater plugin~~ **Dropped for now**: no auto-update and no updater key. Users download new releases from GitHub. Can be added later; apps shipped without it must be reinstalled by hand once.
 - Code signing and SmartScreen (see risks). Benchmark results in the README.
-- **Done when**: a fresh Windows 11 VM installs from the release, the app auto-updates from v0.1.0 to v0.1.1, and the README shows measured numbers.
+- **Done when**: a fresh Windows 11 VM installs from the release and the README shows measured numbers.
 
 **Total: roughly 6 to 8 weeks of part-time work.**
 
