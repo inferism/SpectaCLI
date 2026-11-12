@@ -3,9 +3,12 @@ import { useEffect, useState } from "react";
 import { type DetectedAgent, detectAgents, listWslDistros, onRegistryChanged } from "../../lib/ipc";
 import { fmtBytes } from "../../lib/format";
 import { useStats } from "../../store/stats";
+import { useStatus } from "../../store/status";
 import { activeConversation, type LaunchWhat, useWorkspace } from "../../store/workspace";
 import InlineName from "../InlineName";
 import "../InlineName.css";
+// The status dot styles live with the pane header.
+import "../TermPane/TermPane.css";
 import "./Sidebar.css";
 
 export default function Sidebar() {
@@ -23,6 +26,7 @@ export default function Sidebar() {
     selectConversation,
   } = useWorkspace();
   const tick = useStats((s) => s.tick);
+  const statusOf = useStatus((s) => s.byAgent);
   const [detected, setDetected] = useState<DetectedAgent[]>([]);
   const [picker, setPicker] = useState(false);
   const [custom, setCustom] = useState("");
@@ -138,6 +142,10 @@ export default function Sidebar() {
         {mine.map((a) => (
           <li key={a.id} className={runtime[a.id]?.ptyId && !runtime[a.id].exited ? "" : "exited"}>
             <span className="sb-main">
+              {(() => {
+                const st = statusOf[runtime[a.id]?.ptyId ?? ""]?.status;
+                return <span className={`termpane-dot sb-dot${st ? ` is-${st}` : ""}`} />;
+              })()}
               <InlineName
                 value={a.name}
                 onCommit={(n) => renameAgent(a.id, n)}

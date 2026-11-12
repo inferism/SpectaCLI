@@ -124,3 +124,9 @@
 .sb-picker .sb-check input {
   margin: 0;
 }
+
+.sb-dot {
+  display: inline-block;
+  margin-right: 7px;
+  vertical-align: 1px;
+}
