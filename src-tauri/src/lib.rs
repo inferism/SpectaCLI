@@ -1,5 +1,6 @@
 mod pty;
 mod registry;
+mod store;
 
 use pty::{PtyManager, SpawnRequest};
 use registry::{DetectedAgent, LaunchKind, LaunchSpec};
@@ -107,6 +108,29 @@ async fn kill_agent(pty: State<'_, PtyManager>, agent_id: String) -> Result<(), 
     pty.kill(&agent_id)
 }
 
+/// Serializes saves so two writes never race on the temp file.
+#[derive(Default)]
+struct StoreLock(Mutex<()>);
+
+fn projects_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app.path().app_config_dir().map_err(|e| e.to_string())?.join("projects.json"))
+}
+
+/// The saved projects file, or null when there is none yet.
+#[tauri::command]
+async fn load_projects(app: AppHandle, lock: State<'_, StoreLock>) -> Result<Option<serde_json::Value>, String> {
+    let path = projects_path(&app)?;
+    let _g = lock.0.lock().unwrap_or_else(|e| e.into_inner());
+    store::load(&path)
+}
+
+#[tauri::command]
+async fn save_projects(app: AppHandle, lock: State<'_, StoreLock>, file: serde_json::Value) -> Result<(), String> {
+    let path = projects_path(&app)?;
+    let _g = lock.0.lock().unwrap_or_else(|e| e.into_inner());
+    store::save(&path, &file)
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct AgentExit {
@@ -119,6 +143,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Detected::default())
+        .manage(StoreLock::default())
         .setup(|app| {
             let handle = app.handle().clone();
             app.manage(PtyManager::new(Arc::new(move |id, code| {
@@ -141,7 +166,9 @@ pub fn run() {
             detach_agent,
             write,
             resize,
-            kill_agent
+            kill_agent,
+            load_projects,
+            save_projects
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
