@@ -254,8 +254,8 @@ Estimates assume a few focused hours a day with an AI assistant. They are calend
 2. **(done)** Registry + detection + shim resolution + impostor probe (Rust, with unit tests for PATH and shim parsing).
 3. **(done)** `PtyManager`: spawn direct, Job Object, batched Channel output, write, resize, kill, ring buffer.
 4. **(done)** `TermPane` component: xterm + fit + WebGL with DOM fallback, header (name, status dot placeholder, maximize).
-5. Auto grid: 1 = full, 2 = 1×2, 3 to 4 = 2×2, 5 to 6 = 3×2, 7 and up = 3×3 with a scroll; maximize/restore per pane.
-6. Sidebar: projects (add folder, select, remove), active agents list, the + picker with detected CLIs and a custom command.
+5. **(done)** Auto grid: 1 = full, 2 = 1×2, 3 to 4 = 2×2, 5 to 6 = 3×2, 7 and up = 3×3 with a scroll; maximize/restore per pane.
+6. **(done)** Sidebar: projects (add folder, select, remove), active agents list, the + picker with detected CLIs and a custom command.
 7. Per-project agents: switching hides and shows panes instead of restarting them. Persist `projects.json`.
 8. Restore on restart: the last project's agents relaunch, without resume yet.
 - **Done when**: you can run Claude, Codex, and a custom command in two projects at once; switching projects keeps sessions alive; closing a pane leaves no orphan processes (check in Task Manager); the window drags, snaps, and resizes cleanly; and the installer is under 10 MB.
