@@ -1,0 +1,93 @@
+.sidebar {
+  width: 220px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  border-right: 1px solid #23262e;
+  font-size: 12px;
+}
+
+.sb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.7;
+}
+
+.sidebar button {
+  background: none;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px 6px;
+  font: inherit;
+}
+
+.sidebar button:hover:not(:disabled) {
+  background: #23262e;
+}
+
+.sidebar button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.sb-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sb-list li {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 6px;
+}
+
+.sb-list li.active {
+  background: #1b1e26;
+}
+
+.sb-list li.exited {
+  opacity: 0.5;
+}
+
+.sb-main {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  padding: 5px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sb-picker {
+  display: flex;
+  flex-direction: column;
+  padding: 2px 6px 6px;
+}
+
+.sb-picker button {
+  text-align: left;
+  padding: 5px 6px;
+}
+
+.sb-picker input {
+  margin-top: 4px;
+  background: #161920;
+  border: 1px solid #23262e;
+  color: inherit;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+.sb-error {
+  color: #e06c75;
+  padding: 4px 10px;
+  word-break: break-word;
+}
