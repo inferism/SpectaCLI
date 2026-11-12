@@ -23,6 +23,39 @@
   height: 8px;
   border-radius: 50%;
   background: #5c6370;
+  flex: none;
+}
+
+.termpane-dot.is-working {
+  background: #61afef;
+  animation: termpane-pulse 1.2s ease-in-out infinite;
+}
+
+.termpane-dot.is-idle {
+  background: #98c379;
+}
+
+.termpane-dot.is-needs_input {
+  background: #e5c07b;
+  box-shadow: 0 0 0 2px rgba(229, 192, 123, 0.3);
+}
+
+.termpane-dot.is-exited {
+  background: transparent;
+  border: 1px solid #5c6370;
+  box-sizing: border-box;
+}
+
+@keyframes termpane-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .termpane-dot.is-working {
+    animation: none;
+  }
 }
 
 .termpane-name {

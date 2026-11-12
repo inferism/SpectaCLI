@@ -122,3 +122,20 @@ export const onStatsTick = (cb: (t: StatsTick) => void): Promise<UnlistenFn> =>
 export const loadProjects = () => invoke<unknown>("load_projects");
 /** Atomic write; keeps the previous file as projects.json.bak. */
 export const saveProjects = (file: unknown) => invoke<void>("save_projects", { file });
+
+// --- Status (src-tauri/src/status) ---
+
+export type AgentStatusKind = "starting" | "working" | "idle" | "needs_input" | "exited";
+
+export interface AgentStatus {
+  agentId: string;
+  status: AgentStatusKind;
+  /** What reported it: the launch itself, a CLI hook, or the process exit. */
+  source: "launch" | "hook" | "exit";
+  /** Unix time in ms. */
+  at: number;
+}
+
+/** Fired on every status change of an agent that has a status source (today: CLIs with hooks). */
+export const onAgentStatus = (cb: (s: AgentStatus) => void): Promise<UnlistenFn> =>
+  listen<AgentStatus>("agent:status", (e) => cb(e.payload));

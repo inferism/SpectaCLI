@@ -3,10 +3,38 @@ import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import { type RefObject, useEffect, useLayoutEffect, useRef } from "react";
-import { attachAgent, detachAgent, newAttachId, resizeAgent, writeAgent } from "../../lib/ipc";
+import {
+  type AgentStatus,
+  type AgentStatusKind,
+  attachAgent,
+  detachAgent,
+  newAttachId,
+  resizeAgent,
+  writeAgent,
+} from "../../lib/ipc";
 import { fmtUsage, usageTitle } from "../../lib/format";
 import { useStats } from "../../store/stats";
+import { useStatus } from "../../store/status";
 import "./TermPane.css";
+
+const STATUS_LABEL: Record<AgentStatusKind, string> = {
+  starting: "Starting",
+  working: "Working",
+  idle: "Idle",
+  needs_input: "Needs input",
+  exited: "Exited",
+};
+
+const SOURCE_LABEL: Record<AgentStatus["source"], string> = {
+  launch: "since launch",
+  hook: "reported by the CLI's hook",
+  exit: "process ended",
+};
+
+function statusTitle(s: AgentStatus | undefined): string {
+  if (!s) return "No status signal for this agent";
+  return `${STATUS_LABEL[s.status]} · ${SOURCE_LABEL[s.source]} · ${new Date(s.at).toLocaleTimeString()}`;
+}
 
 interface Props {
   ptyId: string;
@@ -27,13 +55,14 @@ const RESIZE_DEBOUNCE_MS = 50;
  */
 export default function TermPane({ ptyId, visible, name, maximized, onToggleMaximize }: Props) {
   const usage = useStats((s) => s.tick?.agents[ptyId]);
+  const status = useStatus((s) => s.byAgent[ptyId]);
   // Survives the terminal, so focus comes back with it.
   const hadFocus = useRef(false);
 
   return (
     <section className="termpane">
       <header className="termpane-header">
-        <span className="termpane-dot" title="Status" />
+        <span className={`termpane-dot${status ? ` is-${status.status}` : ""}`} title={statusTitle(status)} />
         <span className="termpane-name">{name}</span>
         {usage && (
           <span className="termpane-stats" title={usageTitle(usage)}>
