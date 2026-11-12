@@ -1,13 +1,15 @@
 mod pty;
 mod registry;
 mod session;
+mod shell;
 mod stats;
 mod status;
 mod store;
+mod worktree;
 
 use pty::{PtyManager, SpawnRequest};
 use status::StatusHub;
-use registry::{DetectedAgent, LaunchKind, LaunchSpec};
+use registry::DetectedAgent;
 use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -156,7 +158,7 @@ async fn spawn_agent(
     .map_err(|e| e.to_string())?
 }
 
-/// Start a user-typed command line in `cwd` through the shell.
+/// Start a user-typed command line in `cwd` through PowerShell (pwsh when installed).
 #[tauri::command]
 async fn spawn_custom(
     app: AppHandle,
@@ -169,16 +171,68 @@ async fn spawn_custom(
         return Err("empty command".into());
     }
     tauri::async_runtime::spawn_blocking(move || {
-        // With /s, cmd strips the outer quotes the pty layer adds around the line.
-        let launch = LaunchSpec {
-            kind: LaunchKind::Exe,
-            program: PathBuf::from(std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into())),
-            args: vec!["/d".into(), "/s".into(), "/c".into(), command],
-        };
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let pathext = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into());
+        let launch = shell::custom_command(&command, &path, &pathext);
         app.state::<PtyManager>().spawn(SpawnRequest { id: None, launch, args: vec![], cwd, env: vec![], cols, rows })
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Installed WSL distributions (empty when WSL is missing).
+#[tauri::command]
+async fn list_wsl_distros() -> Result<Vec<String>, String> {
+    tauri::async_runtime::spawn_blocking(shell::list_distros).await.map_err(|e| e.to_string())
+}
+
+/// Start `wsl.exe -d <distro> --cd <wsl path of cwd>`: a login shell, or
+/// `command` run by one.
+#[tauri::command]
+async fn spawn_wsl(
+    app: AppHandle,
+    distro: String,
+    command: Option<String>,
+    cwd: String,
+    cols: u16,
+    rows: u16,
+) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let launch = shell::wsl_launch(&distro, command.as_deref(), &cwd);
+        app.state::<PtyManager>().spawn(SpawnRequest {
+            id: None,
+            launch,
+            args: vec![],
+            cwd: PathBuf::from(&cwd),
+            env: vec![],
+            cols,
+            rows,
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// `git worktree add` for one agent under `<project>/.spectacli/worktrees`.
+#[tauri::command]
+async fn create_worktree(project: PathBuf, name: String) -> Result<worktree::Worktree, String> {
+    tauri::async_runtime::spawn_blocking(move || worktree::create(&project, &name)).await.map_err(|e| e.to_string())?
+}
+
+/// Remove an agent's worktree; an error starting with `dirty:` means it has
+/// uncommitted changes and needs `force`. The branch is kept.
+#[tauri::command]
+async fn remove_worktree(path: PathBuf, force: bool) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || worktree::remove(&path, force)).await.map_err(|e| e.to_string())?
+}
+
+/// Show a folder in Explorer.
+#[tauri::command]
+async fn open_folder(path: PathBuf) -> Result<(), String> {
+    if !path.is_dir() {
+        return Err(format!("{} does not exist", path.display()));
+    }
+    std::process::Command::new("explorer.exe").arg(&path).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Route the agent's live output to `on_output` (raw bytes, batched) and
@@ -306,6 +360,11 @@ pub fn run() {
             detect_agents,
             spawn_agent,
             spawn_custom,
+            list_wsl_distros,
+            spawn_wsl,
+            create_worktree,
+            remove_worktree,
+            open_folder,
             attach_agent,
             detach_agent,
             write,
