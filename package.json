@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "notify": "node scripts/build-notify.mjs",
+    "conpty": "node scripts/fetch-conpty.mjs",
+    "build:conpty": "npm run conpty && tauri build --config src-tauri/tauri.conpty.conf.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

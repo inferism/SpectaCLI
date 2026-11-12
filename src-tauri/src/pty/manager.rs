@@ -399,6 +399,60 @@ mod tests {
         assert_eq!(code, Some(7));
     }
 
+    /// Names of this process's direct children.
+    fn child_exe_names() -> Vec<String> {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+            CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+        };
+        let me = std::process::id();
+        let mut names = vec![];
+        // SAFETY: standard Toolhelp walk over a snapshot we close.
+        unsafe {
+            let snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+            let mut e: PROCESSENTRY32W = std::mem::zeroed();
+            e.dwSize = size_of::<PROCESSENTRY32W>() as u32;
+            let mut ok = Process32FirstW(snap, &mut e) != 0;
+            while ok {
+                if e.th32ParentProcessID == me {
+                    let len = e.szExeFile.iter().position(|&c| c == 0).unwrap_or(e.szExeFile.len());
+                    names.push(String::from_utf16_lossy(&e.szExeFile[..len]));
+                }
+                ok = Process32NextW(snap, &mut e) != 0;
+            }
+            CloseHandle(snap);
+        }
+        names
+    }
+
+    /// With `npm run conpty -- --dev`-style files next to the exe (here the
+    /// test binary), portable-pty must use the bundled ConPTY, whose console
+    /// host is OpenConsole.exe rather than the OS conhost.exe. Skipped when
+    /// the files are absent.
+    #[test]
+    fn bundled_conpty_hosts_with_openconsole() {
+        let dir = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        if !dir.join("conpty.dll").exists() {
+            eprintln!("skipped: no conpty.dll in {}", dir.display());
+            return;
+        }
+        let (m, _rx) = manager();
+        let id = m.spawn(req(LaunchKind::Exe, "cmd.exe", &["/d", "/q", "/k"], &[])).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let names = loop {
+            let n = child_exe_names();
+            if n.iter().any(|n| n.eq_ignore_ascii_case("OpenConsole.exe")) || Instant::now() > deadline {
+                break n;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        };
+        m.kill(&id).unwrap();
+        assert!(
+            names.iter().any(|n| n.eq_ignore_ascii_case("OpenConsole.exe")),
+            "expected the bundled OpenConsole.exe host, children were {names:?}"
+        );
+    }
+
     #[test]
     fn kill_ends_the_whole_tree() {
         use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};

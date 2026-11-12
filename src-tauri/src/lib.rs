@@ -331,8 +331,21 @@ struct AgentExit {
     code: Option<u32>,
 }
 
+/// Load DLLs only from the exe's folder and System32. portable-pty loads
+/// `conpty.dll` by bare name, so this makes it pick the bundled copy (next to
+/// the exe) or fall back to the OS ConPTY, never a stray one on PATH or in
+/// the working directory.
+#[cfg(windows)]
+fn restrict_dll_search() {
+    use windows_sys::Win32::System::LibraryLoader::{SetDefaultDllDirectories, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS};
+    // SAFETY: plain Win32 call with a documented flag.
+    unsafe { SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) };
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(windows)]
+    restrict_dll_search();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
